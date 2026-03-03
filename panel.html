@@ -10,195 +10,295 @@
     #log-table      – table that lists captured requests.
 -->
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>NetContext</title>
-    <style>
-      /* ── Reset & base ──────────────────────────────────────────────── */
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                     Helvetica, Arial, sans-serif;
-        font-size: 13px;
-        color: #202124;
-        background: #fff;
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-        overflow: hidden;
-      }
+<head>
+  <meta charset="UTF-8" />
+  <title>NetContext</title>
+  <style>
+    /* ── Reset & base ──────────────────────────────────────────────── */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-      /* ── Toolbar ───────────────────────────────────────────────────── */
-      #toolbar {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 12px;
-        border-bottom: 1px solid #dadce0;
-        background: #f8f9fa;
-        flex-shrink: 0;
-      }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: #202124;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
 
-      #toolbar h1 {
-        font-size: 14px;
-        font-weight: 600;
-        color: #1a73e8;
-        margin-right: auto;
-      }
+    /* ── Toolbar ───────────────────────────────────────────────────── */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #dadce0;
+      background: #f8f9fa;
+      flex-shrink: 0;
+    }
 
-      /* ── Buttons ───────────────────────────────────────────────────── */
-      button {
-        padding: 5px 12px;
-        border: 1px solid #dadce0;
-        border-radius: 4px;
-        background: #fff;
-        font-size: 12px;
-        cursor: pointer;
-        transition: background 0.15s;
-      }
+    #toolbar h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a73e8;
+      margin-right: auto;
+    }
 
-      button:hover { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
-      button:active { background: #d2e3fc; }
+    /* ── Buttons ───────────────────────────────────────────────────── */
+    button {
+      padding: 5px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      background: #fff;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
 
-      #copy-btn  { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-      #copy-btn:hover  { background: #1557b0; border-color: #1557b0; color: #fff; }
-      #copy-btn:active { background: #0d47a1; }
+    button:hover {
+      background: #e8f0fe;
+      border-color: #1a73e8;
+      color: #1a73e8;
+    }
 
-      /* ── Request counter ───────────────────────────────────────────── */
-      #request-count {
-        font-size: 12px;
-        color: #5f6368;
-        white-space: nowrap;
-      }
+    button:active {
+      background: #d2e3fc;
+    }
 
-      /* ── Status message ────────────────────────────────────────────── */
-      #status-msg {
-        font-size: 12px;
-        padding: 2px 6px;
-        border-radius: 3px;
-        opacity: 0;
-        transition: opacity 0.3s;
-        white-space: nowrap;
-      }
+    /* ── Inputs ────────────────────────────────────────────────────── */
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
 
-      #status-msg.visible { opacity: 1; }
-      #status-msg.success { color: #137333; background: #e6f4ea; }
-      #status-msg.error   { color: #b31412; background: #fce8e6; }
+    .filter-group label {
+      font-size: 12px;
+      color: #5f6368;
+      white-space: nowrap;
+    }
 
-      /* ── Log table ─────────────────────────────────────────────────── */
-      #table-wrapper {
-        flex: 1;
-        overflow-y: auto;
-      }
+    .filter-group input {
+      padding: 4px 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 12px;
+      width: 150px;
+      outline: none;
+    }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-      }
+    .filter-group input:focus {
+      border-color: #1a73e8;
+    }
 
-      thead {
-        position: sticky;
-        top: 0;
-        background: #f1f3f4;
-        z-index: 1;
-      }
+    #copy-btn {
+      background: #1a73e8;
+      color: #fff;
+      border-color: #1a73e8;
+    }
 
-      th, td {
-        padding: 5px 8px;
-        text-align: left;
-        border-bottom: 1px solid #e0e0e0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
+    #copy-btn:hover {
+      background: #1557b0;
+      border-color: #1557b0;
+      color: #fff;
+    }
 
-      th { font-weight: 600; font-size: 12px; color: #5f6368; }
+    #copy-btn:active {
+      background: #0d47a1;
+    }
 
-      /* Column widths */
-      col.col-method    { width: 60px; }
-      col.col-status    { width: 50px; }
-      col.col-url       { width: auto; }
-      col.col-timestamp { width: 170px; }
+    /* ── Request counter ───────────────────────────────────────────── */
+    #request-count {
+      font-size: 12px;
+      color: #5f6368;
+      white-space: nowrap;
+    }
 
-      tr:hover td { background: #e8f0fe; }
+    /* ── Status message ────────────────────────────────────────────── */
+    #status-msg {
+      font-size: 12px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      white-space: nowrap;
+    }
 
-      /* Status-code colours */
-      td.status-ok    { color: #137333; }
-      td.status-redir { color: #e37400; }
-      td.status-err   { color: #b31412; }
+    #status-msg.visible {
+      opacity: 1;
+    }
 
-      /* ── Empty state ───────────────────────────────────────────────── */
-      #empty-state {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        gap: 8px;
-        color: #80868b;
-        height: 100%;
-        font-size: 13px;
-      }
+    #status-msg.success {
+      color: #137333;
+      background: #e6f4ea;
+    }
 
-      #empty-state svg { opacity: 0.4; }
-    </style>
-  </head>
-  <body>
+    #status-msg.error {
+      color: #b31412;
+      background: #fce8e6;
+    }
 
-    <!-- ── Toolbar ──────────────────────────────────────────────────── -->
-    <div id="toolbar">
-      <h1>NetContext</h1>
+    /* ── Log table ─────────────────────────────────────────────────── */
+    #table-wrapper {
+      flex: 1;
+      overflow-y: auto;
+    }
 
-      <span id="request-count">0 requests</span>
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
 
-      <button id="copy-btn" title="Copy all captured requests as pretty-printed JSON">
-        Copy JSON Logs
-      </button>
+    thead {
+      position: sticky;
+      top: 0;
+      background: #f1f3f4;
+      z-index: 1;
+    }
 
-      <button id="clear-btn" title="Clear the current log">
-        Clear
-      </button>
+    th,
+    td {
+      padding: 5px 8px;
+      text-align: left;
+      border-bottom: 1px solid #e0e0e0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
-      <span id="status-msg" role="status" aria-live="polite"></span>
+    th {
+      font-weight: 600;
+      font-size: 12px;
+      color: #5f6368;
+    }
+
+    /* Column widths */
+    col.col-method {
+      width: 60px;
+    }
+
+    col.col-status {
+      width: 50px;
+    }
+
+    col.col-url {
+      width: auto;
+    }
+
+    col.col-timestamp {
+      width: 170px;
+    }
+
+    tr:hover td {
+      background: #e8f0fe;
+    }
+
+    /* Status-code colours */
+    td.status-ok {
+      color: #137333;
+    }
+
+    td.status-redir {
+      color: #e37400;
+    }
+
+    td.status-err {
+      color: #b31412;
+    }
+
+    /* ── Empty state ───────────────────────────────────────────────── */
+    #empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      color: #80868b;
+      height: 100%;
+      font-size: 13px;
+    }
+
+    #empty-state svg {
+      opacity: 0.4;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────── -->
+  <div id="toolbar">
+    <h1>NetContext</h1>
+
+    <div class="filter-group">
+      <label for="base-url-filter">Base URL:</label>
+      <input type="text" id="base-url-filter" placeholder="e.g. https://api.com" />
     </div>
 
-    <!-- ── Log table ─────────────────────────────────────────────────── -->
-    <div id="table-wrapper">
-
-      <!-- Empty-state placeholder (hidden once requests arrive) -->
-      <div id="empty-state">
-        <!-- Simple network-icon SVG, inline to avoid extra file -->
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
-             xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1
-                   14H9V8h2v8zm4 0h-2V8h2v8z"
-                fill="#80868b"/>
-        </svg>
-        <p>No fetch / XHR requests captured yet.</p>
-        <p>Navigate to a page and trigger network activity.</p>
-      </div>
-
-      <table id="log-table" style="display:none">
-        <colgroup>
-          <col class="col-method" />
-          <col class="col-status" />
-          <col class="col-url" />
-          <col class="col-timestamp" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Method</th>
-            <th>Status</th>
-            <th>URL</th>
-            <th>Timestamp</th>
-          </tr>
-        </thead>
-        <tbody id="log-tbody"></tbody>
-      </table>
-
+    <div class="filter-group">
+      <label for="exact-url-filter">Exact URL:</label>
+      <input type="text" id="exact-url-filter" placeholder="e.g. https://api.com/users" />
     </div>
 
-    <script src="panel.js"></script>
-  </body>
+    <span id="request-count">0 requests</span>
+
+    <button id="copy-btn" title="Copy all captured requests as pretty-printed JSON">
+      Copy JSON Logs
+    </button>
+
+    <button id="clear-btn" title="Clear the current log">
+      Clear
+    </button>
+
+    <span id="status-msg" role="status" aria-live="polite"></span>
+  </div>
+
+  <!-- ── Log table ─────────────────────────────────────────────────── -->
+  <div id="table-wrapper">
+
+    <!-- Empty-state placeholder (hidden once requests arrive) -->
+    <div id="empty-state">
+      <!-- Simple network-icon SVG, inline to avoid extra file -->
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1
+                   14H9V8h2v8zm4 0h-2V8h2v8z" fill="#80868b" />
+      </svg>
+      <p>No fetch / XHR requests captured yet.</p>
+      <p>Navigate to a page and trigger network activity.</p>
+    </div>
+
+    <table id="log-table" style="display:none">
+      <colgroup>
+        <col class="col-method" />
+        <col class="col-status" />
+        <col class="col-url" />
+        <col class="col-timestamp" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Status</th>
+          <th>URL</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody id="log-tbody"></tbody>
+    </table>
+
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+
 </html>
