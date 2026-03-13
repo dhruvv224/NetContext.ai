@@ -1,5 +1,9 @@
 # NetContext
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+
 A minimal Chrome DevTools extension (Manifest V3) that captures **fetch** and **XHR** network requests from the inspected page and lets you copy them as structured JSON logs.
 
 ---
@@ -51,6 +55,29 @@ NetContext.ai/
 2. Requests appear in the table in real time.
 3. Click **Copy JSON Logs** to copy the full log to your clipboard.
 4. Click **Clear** to reset the log.
+
+---
+
+## Contributing
+
+We welcome contributions from the community! 🎉
+
+> ⚠️ **Direct pushes to `main` are not allowed.** All changes must be submitted via a Pull Request and reviewed before merging.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to:
+
+- Fork the repository and set up your development environment.
+- Follow our branching naming conventions.
+- Submit a Pull Request.
+- Report bugs or request features.
+
+By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
