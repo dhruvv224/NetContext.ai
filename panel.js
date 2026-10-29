@@ -5,7 +5,9 @@
  *  1. Capture fetch and XHR requests using the native Chrome DevTools API.
  *  2. Render captured requests in the panel table.
  *  3. Allow the user to copy all logs as pretty-printed JSON.
- *  4. Allow the user to clear the current log.
+ *  4. Allow the user to extract and copy unique cart_item objects from responses.
+ *  5. Allow the user to download product images as a Snap-Door compatible SKU ZIP ({product_id}/main.<ext>).
+ *  6. Allow the user to clear the current log.
  */
 
 "use strict";
@@ -13,6 +15,8 @@
 // ── DOM references ──────────────────────────────────────────────────────────
 const countEl = document.getElementById("request-count");
 const copyBtn = document.getElementById("copy-btn");
+const copyCartBtn = document.getElementById("copy-cart-btn");
+const downloadImagesBtn = document.getElementById("download-images-btn");
 const clearBtn = document.getElementById("clear-btn");
 const statusMsg = document.getElementById("status-msg");
 const emptyState = document.getElementById("empty-state");
@@ -34,7 +38,6 @@ exactUrlFilter.addEventListener("input", renderTable);
 
 chrome.devtools.network.onRequestFinished.addListener((request) => {
   // We only care about fetch and XHR requests.
-  // In DevTools, _resourceType can be "fetch" or "xhr".
   const resourceType = request._resourceType || request.resourceType;
   if (resourceType !== "fetch" && resourceType !== "xhr") {
     return;
@@ -56,17 +59,14 @@ chrome.devtools.network.onRequestFinished.addListener((request) => {
     status: request.response.status,
     requestHeaders: reqHeaders,
     responseHeaders: resHeaders,
-    responseBody: null, // Fetched asynchronously below
+    responseBody: null,
     timestamp: request.startedDateTime || new Date().toISOString()
   };
 
   localLogs.push(entry);
-
-  // Render the row immediately without waiting for content.
   renderTable();
 
-  // Asynchronously fetch the response body, then update our entry.
-  // We can't immediately update the UI with body since it's only in JSON export.
+  // Asynchronously fetch the response body
   request.getContent((content, encoding) => {
     if (content) {
       entry.responseBody = content;
@@ -110,14 +110,14 @@ function renderTable() {
   if (count === 0) {
     emptyState.style.display = "";
     logTable.style.display = "none";
-    logTbody.innerHTML = ""; // Clear table when empty
+    logTbody.innerHTML = "";
     return;
   }
 
   emptyState.style.display = "none";
   logTable.style.display = "";
 
-  // Completely rebuild the table since filtering changes the visible set
+  // Rebuild table
   logTbody.innerHTML = "";
   for (let i = 0; i < count; i++) {
     logTbody.appendChild(buildRow(filteredLogs[i]));
@@ -126,18 +126,14 @@ function renderTable() {
 
 /**
  * Build a <tr> element for a single log entry.
- * @param {Object} entry
- * @returns {HTMLTableRowElement}
  */
 function buildRow(entry) {
   const tr = document.createElement("tr");
 
-  // Method
   const tdMethod = document.createElement("td");
   tdMethod.textContent = entry.method || "–";
   tr.appendChild(tdMethod);
 
-  // Status
   const tdStatus = document.createElement("td");
   tdStatus.textContent = entry.status || "–";
   if (entry.status >= 200 && entry.status < 300) {
@@ -149,13 +145,11 @@ function buildRow(entry) {
   }
   tr.appendChild(tdStatus);
 
-  // URL
   const tdUrl = document.createElement("td");
   tdUrl.textContent = entry.url || "–";
   tdUrl.title = entry.url || "";
   tr.appendChild(tdUrl);
 
-  // Timestamp
   const tdTs = document.createElement("td");
   tdTs.textContent = entry.timestamp || "–";
   tr.appendChild(tdTs);
@@ -182,6 +176,114 @@ copyBtn.addEventListener("click", async () => {
   }
 });
 
+// ── Extract Cart Items Helper ───────────────────────────────────────────────
+
+/**
+ * Gather all non-empty response bodies from the currently filtered logs
+ * (or all logs if no URL filter is active) so "Copy Cart Items" and
+ * "Download SKU Images" always extract from the exact same responses.
+ *
+ * @returns {string[]} Array of raw response body strings.
+ */
+function collectAllResponseBodies() {
+  const filtered = getFilteredLogs();
+  const sourceLogs = filtered.length > 0 ? filtered : localLogs;
+  return sourceLogs
+    .map(entry => entry.responseBody)
+    .filter(body => typeof body === "string" && body.trim().length > 0);
+}
+
+// ── Copy Cart Items ──────────────────────────────────────────────────────────
+
+copyCartBtn.addEventListener("click", async () => {
+  const bodies = collectAllResponseBodies();
+
+  if (bodies.length === 0) {
+    showStatus("No response data captured yet.", "error");
+    return;
+  }
+
+  let result;
+  try {
+    result = extractCartItemsFromBatch(bodies);
+  } catch (err) {
+    showStatus("Extraction error: " + err.message, "error");
+    return;
+  }
+
+  if (result.count === 0) {
+    showStatus("No cart_items found in captured responses.", "error");
+    return;
+  }
+
+  try {
+    const json = JSON.stringify(result.cartItems, null, 2);
+    await navigator.clipboard.writeText(json);
+    showStatus(`Cart items copied ✅ (${result.count} products)`, "success");
+  } catch (err) {
+    showStatus("Failed to copy: " + err.message, "error");
+  }
+});
+
+// ── Download SKU Images ZIP (Snap-Door bulk-zip format) ─────────────────────
+
+downloadImagesBtn.addEventListener("click", async () => {
+  const bodies = collectAllResponseBodies();
+
+  if (bodies.length === 0) {
+    showStatus("No response data captured yet.", "error");
+    return;
+  }
+
+  let extraction;
+  try {
+    extraction = extractCartItemsFromBatch(bodies);
+  } catch (err) {
+    showStatus("Extraction error: " + err.message, "error");
+    return;
+  }
+
+  if (extraction.count === 0) {
+    showStatus("No cart_items found in captured responses.", "error");
+    return;
+  }
+
+  const originalBtnText = downloadImagesBtn.textContent;
+  downloadImagesBtn.disabled = true;
+
+  try {
+    showStatus(`⏳ Downloading images for ${extraction.count} products...`, "success", 0);
+
+    const zipResult = await buildSkuImagesZip(extraction.cartItems, {
+      concurrency: 5,
+      onProgress: ({ completed, total }) => {
+        downloadImagesBtn.textContent = `⏳ ${completed}/${total} SKUs...`;
+        showStatus(`⏳ Downloading SKU images (${completed}/${total})...`, "success", 0);
+      },
+    });
+
+    if (zipResult.downloadedImages === 0) {
+      const firstErr = zipResult.failed[0] ? ` (${zipResult.failed[0].reason})` : "";
+      showStatus(`Failed to download any product images${firstErr}.`, "error", 5000);
+      return;
+    }
+
+    triggerZipDownload(zipResult.zipBytes);
+
+    const failNote = zipResult.failed.length > 0 ? ` (${zipResult.failed.length} failed)` : "";
+    showStatus(
+      `✅ Downloaded ZIP: ${zipResult.downloadedProducts}/${zipResult.totalProducts} SKU folders${failNote}`,
+      "success",
+      5000
+    );
+  } catch (err) {
+    showStatus("Image ZIP error: " + err.message, "error", 5000);
+  } finally {
+    downloadImagesBtn.disabled = false;
+    downloadImagesBtn.textContent = originalBtnText;
+  }
+});
+
 // ── Clear Logs ───────────────────────────────────────────────────────────────
 
 clearBtn.addEventListener("click", () => {
@@ -199,14 +301,20 @@ let statusTimer = null;
  * Show a transient status message in the toolbar.
  * @param {string} text
  * @param {"success"|"error"} type
+ * @param {number} [durationMs=3000] - Pass 0 to keep visible until next call
  */
-function showStatus(text, type) {
+function showStatus(text, type, durationMs = 3000) {
   statusMsg.textContent = text;
   statusMsg.className = `visible ${type}`;
 
-  if (statusTimer) clearTimeout(statusTimer);
-  statusTimer = setTimeout(() => {
-    statusMsg.className = "";
-    statusMsg.textContent = "";
-  }, 3000);
+  if (statusTimer) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
+  if (durationMs > 0) {
+    statusTimer = setTimeout(() => {
+      statusMsg.className = "";
+      statusMsg.textContent = "";
+    }, durationMs);
+  }
 }
