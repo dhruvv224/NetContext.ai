@@ -6,6 +6,7 @@
  *  - Maintain an in-memory log of captured fetch / XHR requests per tab.
  *  - Extract cart_item objects from API responses in background.
  *  - Fetch cross-origin product images on behalf of the DevTools panel (bypassing iframe CORS).
+ *  - Trigger file downloads via chrome.downloads API when requested by the DevTools panel.
  */
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -45,7 +46,6 @@ function traverseAndExtract(data, seenIds = new Set(), results = []) {
   }
 
   if (typeof data === "object") {
-    // Check if this object has a valid cart_item property
     if (
       Object.prototype.hasOwnProperty.call(data, "cart_item") &&
       data.cart_item !== null &&
@@ -58,12 +58,10 @@ function traverseAndExtract(data, seenIds = new Set(), results = []) {
         seenIds.add(productId);
         results.push(cartItem);
       } else if (productId === undefined) {
-        // Add items without product_id (can't deduplicate)
         results.push(cartItem);
       }
     }
 
-    // Continue traversing all properties
     Object.values(data).forEach(value => {
       traverseAndExtract(value, seenIds, results);
     });
@@ -140,11 +138,6 @@ const networkLogs = {};
 // Store for extracted cart items: tabId (string) → Array<CartItem>
 const extractedCartItems = {};
 
-/**
- * Return the log array for a given tab, creating it if necessary.
- * @param {number|string} tabId
- * @returns {Array}
- */
 function getLogsForTab(tabId) {
   const key = String(tabId);
   if (!networkLogs[key]) {
@@ -153,7 +146,6 @@ function getLogsForTab(tabId) {
   return networkLogs[key];
 }
 
-// Clean up logs and extracted items when a tab is closed to avoid memory leaks.
 chrome.tabs.onRemoved.addListener(tabId => {
   delete networkLogs[String(tabId)];
   delete extractedCartItems[String(tabId)];
@@ -164,27 +156,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const { type, tabId, entry, jsonData } = message;
 
   switch (type) {
-    // panel.js asks for all logs for a tab
+    case "PING": {
+      sendResponse({ ok: true, version: "0.2.0" });
+      break;
+    }
+
     case "GET_LOGS": {
       sendResponse({ logs: getLogsForTab(tabId) });
       break;
     }
 
-    // panel.js reports a newly captured network entry
     case "ADD_LOG": {
       getLogsForTab(tabId).push(entry);
       sendResponse({ ok: true, count: getLogsForTab(tabId).length });
       break;
     }
 
-    // panel.js requests the log list to be cleared for a tab
     case "CLEAR_LOGS": {
       networkLogs[String(tabId)] = [];
       sendResponse({ ok: true });
       break;
     }
 
-    // Extract cart_item from response body
     case "EXTRACT_CART_ITEMS": {
       const result = extractCartItems(jsonData);
       
@@ -193,7 +186,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         extractedCartItems[tabIdKey] = [];
       }
       
-      // Add newly extracted items, checking for duplicates against storage
       const seenIds = new Set(
         extractedCartItems[tabIdKey].map(item => item.product_id)
       );
@@ -214,7 +206,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
-    // Get all extracted cart items for a tab
     case "GET_CART_ITEMS": {
       const tabIdKey = String(tabId);
       sendResponse({
@@ -224,7 +215,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
-    // Clear cart items for a tab
     case "CLEAR_CART_ITEMS": {
       const tabIdKey = String(tabId);
       const cleared = (extractedCartItems[tabIdKey] || []).length;
@@ -236,7 +226,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
-    // Export all cart items as JSON
     case "EXPORT_CART_ITEMS": {
       const tabIdKey = String(tabId);
       const items = extractedCartItems[tabIdKey] || [];
@@ -257,49 +246,69 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         break;
       }
 
+      const candidates = [
+        { name: "bg-direct", url: targetUrl },
+        { name: "bg-wsrv", url: `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}` },
+        { name: "bg-corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` },
+      ];
+
       (async () => {
-        try {
-          const res = await fetch(targetUrl, { credentials: "omit" });
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-          }
-          const contentType = res.headers.get("content-type") || "";
-          const buffer = await res.arrayBuffer();
-          if (buffer.byteLength === 0) {
-            throw new Error("Empty image response");
-          }
-          sendResponse({
-            ok: true,
-            base64: arrayBufferToBase64(buffer),
-            contentType,
-          });
-        } catch (primaryErr) {
+        const errors = [];
+        for (const candidate of candidates) {
           try {
-            const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}`;
-            const proxyRes = await fetch(proxyUrl, { credentials: "omit" });
-            if (!proxyRes.ok) {
-              throw new Error(`Proxy HTTP ${proxyRes.status}`);
+            const res = await fetch(candidate.url, { credentials: "omit" });
+            if (!res.ok) {
+              throw new Error(`HTTP ${res.status}`);
             }
-            const contentType = proxyRes.headers.get("content-type") || "";
-            const buffer = await proxyRes.arrayBuffer();
+            const contentType = res.headers.get("content-type") || "";
+            const buffer = await res.arrayBuffer();
             if (buffer.byteLength === 0) {
-              throw new Error("Empty proxy response");
+              throw new Error("Empty response");
             }
             sendResponse({
               ok: true,
+              source: candidate.name,
               base64: arrayBufferToBase64(buffer),
               contentType,
+              byteLength: buffer.byteLength,
             });
-          } catch (fallbackErr) {
-            sendResponse({
-              ok: false,
-              error: primaryErr.message || fallbackErr.message || "Failed to fetch image",
-            });
+            return;
+          } catch (err) {
+            errors.push(`${candidate.name}: ${err.message || String(err)}`);
           }
         }
+        sendResponse({
+          ok: false,
+          error: errors.join(" | "),
+        });
       })();
 
       return true;
+    }
+
+    // Trigger file download from background service worker using chrome.downloads
+    case "DOWNLOAD_FILE": {
+      const { dataUrl, filename } = message;
+      if (typeof chrome !== "undefined" && chrome.downloads && typeof chrome.downloads.download === "function") {
+        chrome.downloads.download(
+          {
+            url: dataUrl,
+            filename: filename || `sku-images-${Date.now()}.zip`,
+            saveAs: false,
+          },
+          downloadId => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+            } else {
+              sendResponse({ ok: true, downloadId });
+            }
+          }
+        );
+        return true;
+      } else {
+        sendResponse({ ok: false, error: "chrome.downloads API not available in background" });
+      }
+      break;
     }
 
     default:
