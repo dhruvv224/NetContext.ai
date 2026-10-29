@@ -17,6 +17,7 @@ const countEl = document.getElementById("request-count");
 const copyBtn = document.getElementById("copy-btn");
 const copyCartBtn = document.getElementById("copy-cart-btn");
 const downloadImagesBtn = document.getElementById("download-images-btn");
+const manualZipLink = document.getElementById("manual-zip-link");
 const toggleDebugBtn = document.getElementById("toggle-debug-btn");
 const clearBtn = document.getElementById("clear-btn");
 const statusMsg = document.getElementById("status-msg");
@@ -86,21 +87,7 @@ copyDebugBtn.addEventListener("click", async () => {
 });
 
 // Log initial environment diagnostics on startup
-appendDebugLog("NetContext panel initialized.");
-if (typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
-  chrome.runtime.sendMessage({ type: "PING" }, res => {
-    if (chrome.runtime.lastError) {
-      appendDebugLog(`Background service worker check failed: ${chrome.runtime.lastError.message}`, "warn");
-    } else if (res && res.ok) {
-      appendDebugLog(`Background service worker active (v${res.version}) — FETCH_IMAGE ready.`, "success");
-    } else {
-      appendDebugLog(
-        "Background service worker is running an older version (reload NetContext in chrome://extensions for Tier-1 fetch).",
-        "warn"
-      );
-    }
-  });
-}
+appendDebugLog("NetContext panel initialized (CORS-safe image fetcher ready).");
 
 // Re-render table when filters change
 baseUrlFilter.addEventListener("input", renderTable);
@@ -289,14 +276,16 @@ copyCartBtn.addEventListener("click", async () => {
 // ── Download SKU Images ZIP (Snap-Door bulk-zip format) ─────────────────────
 
 downloadImagesBtn.addEventListener("click", async () => {
+  setDebugDrawerOpen(true);
+  manualZipLink.style.display = "none";
   appendDebugLog("─── Starting SKU Images ZIP Download ───");
+
   const bodies = collectAllResponseBodies();
   appendDebugLog(`Collected ${bodies.length} non-empty response body(s) from ${localLogs.length} captured request(s).`);
 
   if (bodies.length === 0) {
     showStatus("No response data captured yet.", "error");
     appendDebugLog("Aborted: No response bodies captured yet.", "error");
-    setDebugDrawerOpen(true);
     return;
   }
 
@@ -306,7 +295,6 @@ downloadImagesBtn.addEventListener("click", async () => {
   } catch (err) {
     showStatus("Extraction error: " + err.message, "error");
     appendDebugLog(`Extraction exception: ${err.message}`, "error");
-    setDebugDrawerOpen(true);
     return;
   }
 
@@ -314,7 +302,6 @@ downloadImagesBtn.addEventListener("click", async () => {
 
   if (extraction.count === 0) {
     showStatus("No cart_items found in captured responses.", "error");
-    setDebugDrawerOpen(true);
     return;
   }
 
@@ -325,7 +312,7 @@ downloadImagesBtn.addEventListener("click", async () => {
     showStatus(`⏳ Downloading images for ${extraction.count} products...`, "success", 0);
 
     const zipResult = await buildSkuImagesZip(extraction.cartItems, {
-      concurrency: 5,
+      concurrency: 6,
       onDebug: appendDebugLog,
       onProgress: ({ completed, total }) => {
         downloadImagesBtn.textContent = `⏳ ${completed}/${total} SKUs...`;
@@ -335,28 +322,31 @@ downloadImagesBtn.addEventListener("click", async () => {
 
     if (zipResult.downloadedImages === 0) {
       const firstErr = zipResult.failed[0] ? ` (${zipResult.failed[0].reason})` : "";
-      showStatus(`Failed to download images${firstErr}. Check 🐞 Debug log.`, "error", 8000);
-      appendDebugLog(`❌ 0 images downloaded. Opening debug console for details.`, "error");
-      setDebugDrawerOpen(true);
+      showStatus(`Failed to download images${firstErr}.`, "error", 8000);
+      appendDebugLog(`❌ 0 images downloaded.`, "error");
       return;
     }
 
-    const method = await triggerZipDownload(zipResult.zipBytes, undefined, appendDebugLog);
+    const dlInfo = await triggerZipDownload(zipResult.zipBytes, undefined, appendDebugLog);
+
+    // Also expose the direct clickable Blob link in the toolbar
+    if (dlInfo && dlInfo.blobUrl) {
+      const sizeMb = (zipResult.zipBytes.byteLength / 1024 / 1024).toFixed(1);
+      manualZipLink.href = dlInfo.blobUrl;
+      manualZipLink.download = dlInfo.filename;
+      manualZipLink.textContent = `📥 Save ZIP (${sizeMb} MB)`;
+      manualZipLink.style.display = "inline-block";
+    }
 
     const failNote = zipResult.failed.length > 0 ? ` (${zipResult.failed.length} failed)` : "";
     showStatus(
-      `✅ Downloaded ZIP (${zipResult.downloadedProducts}/${zipResult.totalProducts} SKUs via ${method})${failNote}`,
+      `✅ Ready: ${zipResult.downloadedProducts}/${zipResult.totalProducts} SKUs${failNote}`,
       "success",
-      6000
+      8000
     );
-
-    if (zipResult.failed.length > 0) {
-      setDebugDrawerOpen(true);
-    }
   } catch (err) {
     showStatus("Image ZIP error: " + err.message, "error", 8000);
     appendDebugLog(`Fatal ZIP error: ${err.stack || err.message}`, "error");
-    setDebugDrawerOpen(true);
   } finally {
     downloadImagesBtn.disabled = false;
     downloadImagesBtn.textContent = originalBtnText;
@@ -368,6 +358,7 @@ downloadImagesBtn.addEventListener("click", async () => {
 clearBtn.addEventListener("click", () => {
   localLogs = [];
   logTbody.innerHTML = "";
+  manualZipLink.style.display = "none";
   renderTable();
   showStatus("Log cleared.", "success");
   appendDebugLog("Cleared captured network requests.");
