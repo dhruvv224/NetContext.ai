@@ -5,21 +5,27 @@
  *  - Act as a message relay between the DevTools panel and the inspected page.
  *  - Maintain an in-memory log of captured fetch / XHR requests per tab.
  *  - Extract cart_item objects from API responses in background.
- *
- * Data flow:
- *  panel.js  →  chrome.runtime.sendMessage  →  background.js  →  panel.js
- *
- * Log entry shape:
- * {
- *   url:             string,
- *   method:          string,
- *   status:          number,
- *   requestHeaders:  object,
- *   responseHeaders: object,
- *   responseBody:    string | null,
- *   timestamp:       string   (ISO-8601)
- * }
+ *  - Fetch cross-origin product images on behalf of the DevTools panel (bypassing iframe CORS).
  */
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BINARY / BASE64 HELPER
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Convert an ArrayBuffer to a base64 string for safe message passing.
+ * @param {ArrayBuffer} buffer
+ * @returns {string}
+ */
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // CART ITEM EXTRACTION UTILITY
@@ -241,6 +247,59 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         timestamp: new Date().toISOString(),
       });
       break;
+    }
+
+    // Fetch cross-origin image in the privileged service worker context
+    case "FETCH_IMAGE": {
+      const targetUrl = message.url;
+      if (!targetUrl || typeof targetUrl !== "string") {
+        sendResponse({ ok: false, error: "Missing image URL" });
+        break;
+      }
+
+      (async () => {
+        try {
+          const res = await fetch(targetUrl, { credentials: "omit" });
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const contentType = res.headers.get("content-type") || "";
+          const buffer = await res.arrayBuffer();
+          if (buffer.byteLength === 0) {
+            throw new Error("Empty image response");
+          }
+          sendResponse({
+            ok: true,
+            base64: arrayBufferToBase64(buffer),
+            contentType,
+          });
+        } catch (primaryErr) {
+          try {
+            const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}`;
+            const proxyRes = await fetch(proxyUrl, { credentials: "omit" });
+            if (!proxyRes.ok) {
+              throw new Error(`Proxy HTTP ${proxyRes.status}`);
+            }
+            const contentType = proxyRes.headers.get("content-type") || "";
+            const buffer = await proxyRes.arrayBuffer();
+            if (buffer.byteLength === 0) {
+              throw new Error("Empty proxy response");
+            }
+            sendResponse({
+              ok: true,
+              base64: arrayBufferToBase64(buffer),
+              contentType,
+            });
+          } catch (fallbackErr) {
+            sendResponse({
+              ok: false,
+              error: primaryErr.message || fallbackErr.message || "Failed to fetch image",
+            });
+          }
+        }
+      })();
+
+      return true;
     }
 
     default:
