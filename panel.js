@@ -7,7 +7,7 @@
  *  3. Allow the user to copy all logs as pretty-printed JSON.
  *  4. Allow the user to extract and copy unique cart_item objects from responses.
  *  5. Allow the user to download product images as a Snap-Door compatible SKU ZIP ({product_id}/main.<ext>).
- *  6. Allow the user to clear the current log.
+ *  6. Provide a built-in diagnostic console (#debug-drawer) to inspect every step and error.
  */
 
 "use strict";
@@ -17,6 +17,7 @@ const countEl = document.getElementById("request-count");
 const copyBtn = document.getElementById("copy-btn");
 const copyCartBtn = document.getElementById("copy-cart-btn");
 const downloadImagesBtn = document.getElementById("download-images-btn");
+const toggleDebugBtn = document.getElementById("toggle-debug-btn");
 const clearBtn = document.getElementById("clear-btn");
 const statusMsg = document.getElementById("status-msg");
 const emptyState = document.getElementById("empty-state");
@@ -25,10 +26,81 @@ const logTbody = document.getElementById("log-tbody");
 const baseUrlFilter = document.getElementById("base-url-filter");
 const exactUrlFilter = document.getElementById("exact-url-filter");
 
+const debugDrawer = document.getElementById("debug-drawer");
+const debugLogsEl = document.getElementById("debug-logs");
+const copyDebugBtn = document.getElementById("copy-debug-btn");
+const clearDebugBtn = document.getElementById("clear-debug-btn");
+const closeDebugBtn = document.getElementById("close-debug-btn");
+
 // ── State ───────────────────────────────────────────────────────────────────
 
 /** Local cache of log entries rendered in the table. */
 let localLogs = [];
+
+/** Plain-text history of diagnostic lines for easy copy/paste. */
+const debugHistory = [];
+
+// ── Built-in Diagnostic Console Helpers ─────────────────────────────────────
+
+function appendDebugLog(message, level = "info") {
+  const ts = new Date().toISOString().slice(11, 23);
+  const lineText = `[${ts}] ${message}`;
+  debugHistory.push(lineText);
+
+  const div = document.createElement("div");
+  div.className = `dbg-line dbg-${level}`;
+  div.textContent = lineText;
+  debugLogsEl.appendChild(div);
+  debugLogsEl.scrollTop = debugLogsEl.scrollHeight;
+}
+
+function setDebugDrawerOpen(open) {
+  if (open) {
+    debugDrawer.classList.add("open");
+    toggleDebugBtn.classList.add("active");
+  } else {
+    debugDrawer.classList.remove("open");
+    toggleDebugBtn.classList.remove("active");
+  }
+}
+
+toggleDebugBtn.addEventListener("click", () => {
+  const isOpen = debugDrawer.classList.contains("open");
+  setDebugDrawerOpen(!isOpen);
+});
+
+closeDebugBtn.addEventListener("click", () => setDebugDrawerOpen(false));
+
+clearDebugBtn.addEventListener("click", () => {
+  debugHistory.length = 0;
+  debugLogsEl.innerHTML = "";
+});
+
+copyDebugBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(debugHistory.join("\n"));
+    showStatus("✓ Copied debug log to clipboard.", "success");
+  } catch (err) {
+    showStatus("Failed to copy debug log: " + err.message, "error");
+  }
+});
+
+// Log initial environment diagnostics on startup
+appendDebugLog("NetContext panel initialized.");
+if (typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
+  chrome.runtime.sendMessage({ type: "PING" }, res => {
+    if (chrome.runtime.lastError) {
+      appendDebugLog(`Background service worker check failed: ${chrome.runtime.lastError.message}`, "warn");
+    } else if (res && res.ok) {
+      appendDebugLog(`Background service worker active (v${res.version}) — FETCH_IMAGE ready.`, "success");
+    } else {
+      appendDebugLog(
+        "Background service worker is running an older version (reload NetContext in chrome://extensions for Tier-1 fetch).",
+        "warn"
+      );
+    }
+  });
+}
 
 // Re-render table when filters change
 baseUrlFilter.addEventListener("input", renderTable);
@@ -37,7 +109,6 @@ exactUrlFilter.addEventListener("input", renderTable);
 // ── Intercept Requests via DevTools API ──────────────────────────────────────
 
 chrome.devtools.network.onRequestFinished.addListener((request) => {
-  // We only care about fetch and XHR requests.
   const resourceType = request._resourceType || request.resourceType;
   if (resourceType !== "fetch" && resourceType !== "xhr") {
     return;
@@ -67,7 +138,7 @@ chrome.devtools.network.onRequestFinished.addListener((request) => {
   renderTable();
 
   // Asynchronously fetch the response body
-  request.getContent((content, encoding) => {
+  request.getContent((content) => {
     if (content) {
       entry.responseBody = content;
     }
@@ -79,13 +150,11 @@ chrome.devtools.network.onNavigated.addListener(() => {
   localLogs = [];
   logTbody.innerHTML = "";
   renderTable();
+  appendDebugLog("Page navigated — network log reset.");
 });
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 
-/**
- * Get the currently filtered list of logs.
- */
 function getFilteredLogs() {
   const baseUrl = baseUrlFilter.value.trim();
   const exactUrl = exactUrlFilter.value.trim();
@@ -97,14 +166,10 @@ function getFilteredLogs() {
   });
 }
 
-/**
- * Re-render the log table and update the request counter.
- */
 function renderTable() {
   const filteredLogs = getFilteredLogs();
   const count = filteredLogs.length;
 
-  // Update counter text
   countEl.textContent = count === 1 ? "1 request" : `${count} requests`;
 
   if (count === 0) {
@@ -117,16 +182,12 @@ function renderTable() {
   emptyState.style.display = "none";
   logTable.style.display = "";
 
-  // Rebuild table
   logTbody.innerHTML = "";
   for (let i = 0; i < count; i++) {
     logTbody.appendChild(buildRow(filteredLogs[i]));
   }
 }
 
-/**
- * Build a <tr> element for a single log entry.
- */
 function buildRow(entry) {
   const tr = document.createElement("tr");
 
@@ -171,20 +232,15 @@ copyBtn.addEventListener("click", async () => {
     const json = JSON.stringify(filteredLogs, null, 2);
     await navigator.clipboard.writeText(json);
     showStatus(`✓ Copied ${filteredLogs.length} request(s) to clipboard.`, "success");
+    appendDebugLog(`Copied ${filteredLogs.length} request log(s) to clipboard.`, "success");
   } catch (err) {
     showStatus("Failed to copy: " + err.message, "error");
+    appendDebugLog(`Copy JSON Logs error: ${err.message}`, "error");
   }
 });
 
 // ── Extract Cart Items Helper ───────────────────────────────────────────────
 
-/**
- * Gather all non-empty response bodies from the currently filtered logs
- * (or all logs if no URL filter is active) so "Copy Cart Items" and
- * "Download SKU Images" always extract from the exact same responses.
- *
- * @returns {string[]} Array of raw response body strings.
- */
 function collectAllResponseBodies() {
   const filtered = getFilteredLogs();
   const sourceLogs = filtered.length > 0 ? filtered : localLogs;
@@ -200,6 +256,7 @@ copyCartBtn.addEventListener("click", async () => {
 
   if (bodies.length === 0) {
     showStatus("No response data captured yet.", "error");
+    appendDebugLog("Copy Cart Items: 0 response bodies available.", "warn");
     return;
   }
 
@@ -208,11 +265,13 @@ copyCartBtn.addEventListener("click", async () => {
     result = extractCartItemsFromBatch(bodies);
   } catch (err) {
     showStatus("Extraction error: " + err.message, "error");
+    appendDebugLog(`Extraction error: ${err.message}`, "error");
     return;
   }
 
   if (result.count === 0) {
     showStatus("No cart_items found in captured responses.", "error");
+    appendDebugLog(`Scanned ${bodies.length} response(s), found 0 cart_items.`, "warn");
     return;
   }
 
@@ -220,18 +279,24 @@ copyCartBtn.addEventListener("click", async () => {
     const json = JSON.stringify(result.cartItems, null, 2);
     await navigator.clipboard.writeText(json);
     showStatus(`Cart items copied ✅ (${result.count} products)`, "success");
+    appendDebugLog(`Copied ${result.count} unique cart_items (${result.duplicates} duplicates removed).`, "success");
   } catch (err) {
     showStatus("Failed to copy: " + err.message, "error");
+    appendDebugLog(`Clipboard write failed: ${err.message}`, "error");
   }
 });
 
 // ── Download SKU Images ZIP (Snap-Door bulk-zip format) ─────────────────────
 
 downloadImagesBtn.addEventListener("click", async () => {
+  appendDebugLog("─── Starting SKU Images ZIP Download ───");
   const bodies = collectAllResponseBodies();
+  appendDebugLog(`Collected ${bodies.length} non-empty response body(s) from ${localLogs.length} captured request(s).`);
 
   if (bodies.length === 0) {
     showStatus("No response data captured yet.", "error");
+    appendDebugLog("Aborted: No response bodies captured yet.", "error");
+    setDebugDrawerOpen(true);
     return;
   }
 
@@ -240,11 +305,16 @@ downloadImagesBtn.addEventListener("click", async () => {
     extraction = extractCartItemsFromBatch(bodies);
   } catch (err) {
     showStatus("Extraction error: " + err.message, "error");
+    appendDebugLog(`Extraction exception: ${err.message}`, "error");
+    setDebugDrawerOpen(true);
     return;
   }
 
+  appendDebugLog(`Extracted ${extraction.count} unique cart_items (${extraction.duplicates} duplicates skipped).`);
+
   if (extraction.count === 0) {
     showStatus("No cart_items found in captured responses.", "error");
+    setDebugDrawerOpen(true);
     return;
   }
 
@@ -256,6 +326,7 @@ downloadImagesBtn.addEventListener("click", async () => {
 
     const zipResult = await buildSkuImagesZip(extraction.cartItems, {
       concurrency: 5,
+      onDebug: appendDebugLog,
       onProgress: ({ completed, total }) => {
         downloadImagesBtn.textContent = `⏳ ${completed}/${total} SKUs...`;
         showStatus(`⏳ Downloading SKU images (${completed}/${total})...`, "success", 0);
@@ -264,20 +335,28 @@ downloadImagesBtn.addEventListener("click", async () => {
 
     if (zipResult.downloadedImages === 0) {
       const firstErr = zipResult.failed[0] ? ` (${zipResult.failed[0].reason})` : "";
-      showStatus(`Failed to download any product images${firstErr}.`, "error", 5000);
+      showStatus(`Failed to download images${firstErr}. Check 🐞 Debug log.`, "error", 8000);
+      appendDebugLog(`❌ 0 images downloaded. Opening debug console for details.`, "error");
+      setDebugDrawerOpen(true);
       return;
     }
 
-    triggerZipDownload(zipResult.zipBytes);
+    const method = await triggerZipDownload(zipResult.zipBytes, undefined, appendDebugLog);
 
     const failNote = zipResult.failed.length > 0 ? ` (${zipResult.failed.length} failed)` : "";
     showStatus(
-      `✅ Downloaded ZIP: ${zipResult.downloadedProducts}/${zipResult.totalProducts} SKU folders${failNote}`,
+      `✅ Downloaded ZIP (${zipResult.downloadedProducts}/${zipResult.totalProducts} SKUs via ${method})${failNote}`,
       "success",
-      5000
+      6000
     );
+
+    if (zipResult.failed.length > 0) {
+      setDebugDrawerOpen(true);
+    }
   } catch (err) {
-    showStatus("Image ZIP error: " + err.message, "error", 5000);
+    showStatus("Image ZIP error: " + err.message, "error", 8000);
+    appendDebugLog(`Fatal ZIP error: ${err.stack || err.message}`, "error");
+    setDebugDrawerOpen(true);
   } finally {
     downloadImagesBtn.disabled = false;
     downloadImagesBtn.textContent = originalBtnText;
@@ -291,18 +370,13 @@ clearBtn.addEventListener("click", () => {
   logTbody.innerHTML = "";
   renderTable();
   showStatus("Log cleared.", "success");
+  appendDebugLog("Cleared captured network requests.");
 });
 
 // ── Status message helper ─────────────────────────────────────────────────
 
 let statusTimer = null;
 
-/**
- * Show a transient status message in the toolbar.
- * @param {string} text
- * @param {"success"|"error"} type
- * @param {number} [durationMs=3000] - Pass 0 to keep visible until next call
- */
 function showStatus(text, type, durationMs = 3000) {
   statusMsg.textContent = text;
   statusMsg.className = `visible ${type}`;
