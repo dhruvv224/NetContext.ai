@@ -5,8 +5,7 @@
  *  - Act as a message relay between the DevTools panel and the inspected page.
  *  - Maintain an in-memory log of captured fetch / XHR requests per tab.
  *  - Extract cart_item objects from API responses in background.
- *  - Fetch cross-origin product images on behalf of the DevTools panel (bypassing iframe CORS).
- *  - Trigger file downloads via chrome.downloads API when requested by the DevTools panel.
+ *  - Fetch product images via CORS-safe endpoints on behalf of the DevTools panel.
  */
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -157,7 +156,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   switch (type) {
     case "PING": {
-      sendResponse({ ok: true, version: "0.2.0" });
+      sendResponse({ ok: true, version: "0.3.0" });
       break;
     }
 
@@ -238,7 +237,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
-    // Fetch cross-origin image in the privileged service worker context
+    // Fetch image using CORS-enabled proxies first so Chrome never logs red CORS errors
     case "FETCH_IMAGE": {
       const targetUrl = message.url;
       if (!targetUrl || typeof targetUrl !== "string") {
@@ -247,7 +246,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       const candidates = [
-        { name: "bg-direct", url: targetUrl },
         { name: "bg-wsrv", url: `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}` },
         { name: "bg-corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` },
       ];
@@ -284,31 +282,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })();
 
       return true;
-    }
-
-    // Trigger file download from background service worker using chrome.downloads
-    case "DOWNLOAD_FILE": {
-      const { dataUrl, filename } = message;
-      if (typeof chrome !== "undefined" && chrome.downloads && typeof chrome.downloads.download === "function") {
-        chrome.downloads.download(
-          {
-            url: dataUrl,
-            filename: filename || `sku-images-${Date.now()}.zip`,
-            saveAs: false,
-          },
-          downloadId => {
-            if (chrome.runtime.lastError) {
-              sendResponse({ ok: false, error: chrome.runtime.lastError.message });
-            } else {
-              sendResponse({ ok: true, downloadId });
-            }
-          }
-        );
-        return true;
-      } else {
-        sendResponse({ ok: false, error: "chrome.downloads API not available in background" });
-      }
-      break;
     }
 
     default:
