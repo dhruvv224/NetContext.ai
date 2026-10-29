@@ -57,6 +57,22 @@ function toDosDateTime(date = new Date()) {
 }
 
 /**
+ * Decode a base64 string into a Uint8Array.
+ * @param {string} base64
+ * @returns {Uint8Array}
+ */
+function base64ToUint8Array(base64) {
+  const clean = base64.replace(/^data:[^;]+;base64,/, "").trim();
+  const binary = atob(clean);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Build a standard PKZIP archive buffer (STORE method) from an array of files.
  * Compatible with AdmZip (used by Snap-door-api) and all standard unzip tools.
  *
@@ -262,6 +278,155 @@ function extractProductImageUrls(item) {
 }
 
 /**
+ * Tier 1: Fetch image via extension background service worker (bypasses DevTools iframe CORS).
+ * @param {string} url
+ * @returns {Promise<{ bytes: Uint8Array, contentType: string } | null>}
+ */
+function fetchImageViaBackground(url) {
+  return new Promise(resolve => {
+    if (
+      typeof chrome === "undefined" ||
+      !chrome.runtime ||
+      typeof chrome.runtime.sendMessage !== "function"
+    ) {
+      resolve(null);
+      return;
+    }
+
+    try {
+      chrome.runtime.sendMessage({ type: "FETCH_IMAGE", url }, response => {
+        if (chrome.runtime.lastError || !response || !response.ok || !response.base64) {
+          resolve(null);
+          return;
+        }
+        try {
+          const bytes = base64ToUint8Array(response.base64);
+          if (bytes.byteLength > 0) {
+            resolve({ bytes, contentType: response.contentType || "" });
+          } else {
+            resolve(null);
+          }
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Tier 2: Check if the image is already cached in DevTools inspectedWindow resources.
+ * @param {string} url
+ * @returns {Promise<{ bytes: Uint8Array, contentType: string } | null>}
+ */
+function fetchImageViaDevToolsResource(url) {
+  return new Promise(resolve => {
+    if (
+      typeof chrome === "undefined" ||
+      !chrome.devtools ||
+      !chrome.devtools.inspectedWindow ||
+      typeof chrome.devtools.inspectedWindow.getResources !== "function"
+    ) {
+      resolve(null);
+      return;
+    }
+
+    try {
+      chrome.devtools.inspectedWindow.getResources(resources => {
+        if (!Array.isArray(resources)) {
+          resolve(null);
+          return;
+        }
+        const match = resources.find(r => r && r.url === url);
+        if (!match || typeof match.getContent !== "function") {
+          resolve(null);
+          return;
+        }
+        match.getContent((content, encoding) => {
+          if (!content) {
+            resolve(null);
+            return;
+          }
+          try {
+            if (encoding === "base64") {
+              const bytes = base64ToUint8Array(content);
+              if (bytes.byteLength > 0) {
+                resolve({ bytes, contentType: "" });
+                return;
+              }
+            }
+          } catch (_) {
+            // Fall through
+          }
+          resolve(null);
+        });
+      });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Multi-tier cross-origin image fetcher:
+ *  1. Extension service worker (`FETCH_IMAGE` in background.js)
+ *  2. DevTools inspected page resource cache (`chrome.devtools.inspectedWindow.getResources`)
+ *  3. Direct `fetch(url)` (when server sends CORS headers or in Node.js)
+ *  4. CORS-safe image proxy (`https://wsrv.nl/?url=...`) so it works inside DevTools panel
+ *     iframes and standalone HTML pages even when the CDN omits Access-Control-Allow-Origin.
+ *
+ * @param {string} url
+ * @returns {Promise<{ bytes: Uint8Array, contentType: string }>}
+ */
+async function fetchImageBytes(url) {
+  // 1. Try background service worker
+  const fromBg = await fetchImageViaBackground(url);
+  if (fromBg) return fromBg;
+
+  // 2. Try DevTools inspectedWindow cached resources
+  const fromDevTools = await fetchImageViaDevToolsResource(url);
+  if (fromDevTools) return fromDevTools;
+
+  // 3. Try direct fetch
+  let directError = null;
+  try {
+    const response = await fetch(url, { credentials: "omit" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const contentType = response.headers.get("content-type") || "";
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    if (bytes.byteLength === 0) {
+      throw new Error("Empty image response");
+    }
+    return { bytes, contentType };
+  } catch (err) {
+    directError = err;
+  }
+
+  // 4. Fallback to CORS-enabled image proxy (wsrv.nl sends Access-Control-Allow-Origin: *)
+  try {
+    const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(url)}`;
+    const proxyResponse = await fetch(proxyUrl, { credentials: "omit" });
+    if (!proxyResponse.ok) {
+      throw new Error(`Proxy HTTP ${proxyResponse.status}`);
+    }
+    const contentType = proxyResponse.headers.get("content-type") || "";
+    const arrayBuffer = await proxyResponse.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    if (bytes.byteLength === 0) {
+      throw new Error("Empty proxy image response");
+    }
+    return { bytes, contentType };
+  } catch (proxyErr) {
+    throw directError || proxyErr;
+  }
+}
+
+/**
  * Download images for all cart_items and package them into a Snap-Door compatible
  * ZIP archive (`{SKU}/main.png`, `{SKU}/image_2.png`, etc.).
  *
@@ -317,18 +482,7 @@ async function buildSkuImagesZip(cartItems, options = {}) {
       for (let imgIdx = 0; imgIdx < task.urls.length; imgIdx++) {
         const url = task.urls[imgIdx];
         try {
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          const contentType = response.headers.get("content-type") || "";
-          const arrayBuffer = await response.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuffer);
-
-          if (bytes.byteLength === 0) {
-            throw new Error("Empty image response");
-          }
-
+          const { bytes, contentType } = await fetchImageBytes(url);
           const ext = resolveImageExtension(url, contentType);
           const baseName = imgIdx === 0 ? "main" : `image_${imgIdx + 1}`;
           const entryPath = `${task.sku}/${baseName}${ext}`;
@@ -407,6 +561,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolveItemSku,
     resolveImageExtension,
     extractProductImageUrls,
+    fetchImageBytes,
     buildSkuImagesZip,
     triggerZipDownload,
   };
