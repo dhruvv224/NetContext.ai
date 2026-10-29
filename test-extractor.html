@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cart Items Extractor - Test Tool</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    
+    h1 {
+      color: #1a73e8;
+      border-bottom: 3px solid #1a73e8;
+      padding-bottom: 10px;
+    }
+    
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .panel {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .panel h2 {
+      margin-top: 0;
+      color: #1a73e8;
+      font-size: 16px;
+    }
+    
+    textarea, input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 12px;
+    }
+    
+    textarea {
+      height: 300px;
+      resize: vertical;
+      font-size: 11px;
+    }
+    
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      margin: 10px 5px 10px 0;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #1557b0;
+    }
+    
+    button:active {
+      transform: scale(0.98);
+    }
+    
+    button.secondary {
+      background: #5f6368;
+    }
+    
+    button.secondary:hover {
+      background: #3c4043;
+    }
+
+    button.purple {
+      background: #673ab7;
+    }
+
+    button.purple:hover {
+      background: #512da8;
+    }
+
+    button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+    
+    button.danger {
+      background: #d33827;
+    }
+    
+    button.danger:hover {
+      background: #a50e0e;
+    }
+    
+    .button-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 15px 0;
+      padding: 15px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      border-left: 4px solid #1a73e8;
+    }
+    
+    .stat {
+      text-align: center;
+    }
+    
+    .stat-value {
+      font-size: 28px;
+      font-weight: bold;
+      color: #1a73e8;
+    }
+    
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+    
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 11px;
+    }
+    
+    .result-table th {
+      background: #f0f0f0;
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .result-table td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .result-table tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    
+    .status {
+      padding: 12px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-weight: 500;
+    }
+    
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
+    .status.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    
+    .example-json {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px dashed #999;
+      margin: 10px 0;
+      font-family: monospace;
+      font-size: 10px;
+      max-height: 120px;
+      overflow-y: auto;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .example-json:hover {
+      background: #efefef;
+    }
+    
+    .full-width {
+      grid-column: 1 / -1;
+    }
+    
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #ddd;
+    }
+    
+    .tab {
+      padding: 10px 20px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #888;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+    }
+    
+    .tab.active {
+      color: #1a73e8;
+      border-bottom-color: #1a73e8;
+    }
+    
+    .tab-content {
+      display: none;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>🛒 Cart Items Extractor - Test Tool</h1>
+  <p style="color: #666; margin: 0 0 20px 0;">
+    Test the cart item extraction and Snap-Door SKU image ZIP downloader without needing the Chrome extension.
+    Paste JSON, click Extract, and download the SKU images ZIP.
+  </p>
+  
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('test', event)">Test Extractor</button>
+    <button class="tab" onclick="switchTab('examples', event)">Examples</button>
+    <button class="tab" onclick="switchTab('guide', event)">How It Works</button>
+  </div>
+  
+  <!-- TEST TAB -->
+  <div id="test" class="tab-content active">
+    <div class="container">
+      <!-- Input Panel -->
+      <div class="panel">
+        <h2>📥 Input</h2>
+        <label style="font-weight: 600; display: block; margin-bottom: 8px;">Paste JSON Response (or copied cart_items array):</label>
+        <textarea id="jsonInput" placeholder='{"cart": {"cart_item": {...}}}' spellcheck="false"></textarea>
+        
+        <div class="button-group">
+          <button onclick="runExtraction()">▶ Extract Cart Items</button>
+          <button class="secondary" onclick="loadExample1()">📋 Load Example 1</button>
+          <button class="secondary" onclick="loadExample2()">📋 Load Example 2</button>
+          <button class="danger" onclick="clearInput()">Clear</button>
+        </div>
+      </div>
+      
+      <!-- Output Panel -->
+      <div class="panel">
+        <h2>📊 Results</h2>
+        <div id="stats" class="stats" style="display: none;">
+          <div class="stat">
+            <div class="stat-value" id="itemCount">0</div>
+            <div class="stat-label">Items Extracted</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="duplicateCount">0</div>
+            <div class="stat-label">Duplicates Removed</div>
+          </div>
+        </div>
+        
+        <div id="status"></div>
+        
+        <div style="margin-top: 15px;">
+          <button class="secondary" onclick="copyResultsJson()" style="width: 100%;">📋 Copy Results as JSON</button>
+          <button class="secondary" onclick="downloadResults()" style="width: 100%;">💾 Download as JSON File</button>
+          <button id="downloadZipBtn" class="purple" onclick="downloadSkuImagesZip()" style="width: 100%;">🖼️ Download SKU Images ZIP ({product_id}/main.png)</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Results Table -->
+    <div class="panel full-width" id="resultsPanel" style="display: none;">
+      <h2>Extracted Cart Items</h2>
+      <div style="overflow-x: auto;">
+        <table class="result-table" id="resultsTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Product ID (SKU)</th>
+              <th>Name</th>
+              <th>Image URL</th>
+              <th>Data (Preview)</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Raw Output -->
+    <div class="panel full-width" id="rawPanel" style="display: none;">
+      <h2>Raw JSON Output</h2>
+      <textarea id="jsonOutput" readonly spellcheck="false" style="height: 200px;"></textarea>
+    </div>
+  </div>
+  
+  <!-- EXAMPLES TAB -->
+  <div id="examples" class="tab-content">
+    <div class="panel">
+      <h2>Example 1: Simple Cart</h2>
+      <p>Basic JSON with cart_item in a simple structure:</p>
+      <div class="example-json" onclick="loadExample1(); switchTab('test')">
+{
+  "user": {"name": "John"},
+  "cart": {
+    "cart_item": {
+      "product_id": "SKU-001",
+      "name": "Widget",
+      "price": 29.99
+    }
+  }
+}
+      </div>
+      <button onclick="loadExample1(); switchTab('test')">Test this example</button>
+    </div>
+    
+    <div class="panel">
+      <h2>Example 2: Nested with Duplicates</h2>
+      <p>Complex nested structure with duplicate product IDs to demonstrate deduplication:</p>
+      <div class="example-json" onclick="loadExample2(); switchTab('test')">
+{
+  "results": [
+    {
+      "cart_item": {
+        "product_id": "A",
+        "name": "Item A",
+        "price": 10
+      }
+    },
+    {
+      "cart_item": {
+        "product_id": "A",
+        "name": "Item A",
+        "price": 10
+      }
+    },
+    {
+      "nested": {
+        "cart_item": {
+          "product_id": "B",
+          "name": "Item B",
+          "price": 20
+        }
+      }
+    }
+  ]
+}
+      </div>
+      <button onclick="loadExample2(); switchTab('test')">Test this example</button>
+    </div>
+    
+    <div class="panel">
+      <h2>Example 3: Deeply Nested</h2>
+      <p>Multiple levels of nesting to show recursive traversal:</p>
+      <div class="example-json" onclick="loadExample3(); switchTab('test')">
+{
+  "l1": {
+    "l2": {
+      "l3": {
+        "l4": {
+          "cart_item": {
+            "product_id": "DEEP-001",
+            "name": "Deep Item"
+          }
+        }
+      }
+    }
+  }
+}
+      </div>
+      <button onclick="loadExample3(); switchTab('test')">Test this example</button>
+    </div>
+  </div>
+  
+  <!-- GUIDE TAB -->
+  <div id="guide" class="tab-content">
+    <div class="panel full-width">
+      <h2>How the Extractor & SKU Image ZIP Builder Work</h2>
+      
+      <h3>1. Recursive Traversal</h3>
+      <p>The extractor walks through the entire JSON structure recursively, checking every object and array at every depth level.</p>
+      
+      <h3>2. Detection & Deduplication</h3>
+      <p>When it finds an object with a <code>"cart_item"</code> key (or a top-level array of extracted product objects), it deduplicates by <code>product_id</code> and preserves the complete object.</p>
+      
+      <h3>3. Snap-Door Bulk Image ZIP Format</h3>
+      <p>Snap-Door's <code>POST /api/v1/admin/inventory/images/bulk-zip</code> endpoint expects a single <code>.zip</code> archive where each product has its own folder named after its uppercase SKU (<code>product_id</code>):</p>
+      <pre style="background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto;">
+sku-images.zip
+├── 396515/
+│   └── main.png
+├── 314/
+│   └── main.png
+└── 283/
+    └── main.png
+      </pre>
+    </div>
+  </div>
+
+  <script src="cart-item-extractor.js"></script>
+  <script src="zip-builder.js"></script>
+  <script>
+    let currentExtractedItems = [];
+
+    function runExtraction() {
+      const jsonInput = document.getElementById("jsonInput").value.trim();
+      
+      if (!jsonInput) {
+        showStatus("Please paste JSON input", "error");
+        return;
+      }
+
+      const result = extractCartItems(jsonInput);
+      if (result.error) {
+        showStatus("❌ " + result.error, "error");
+        return;
+      }
+
+      currentExtractedItems = result.cartItems;
+      displayResults(result.cartItems, result.duplicates);
+    }
+
+    function displayResults(cartItems, duplicatesRemoved) {
+      const itemCount = cartItems.length;
+      
+      document.getElementById("itemCount").textContent = itemCount;
+      document.getElementById("duplicateCount").textContent = duplicatesRemoved;
+      document.getElementById("stats").style.display = "grid";
+      
+      if (itemCount > 0) {
+        showStatus(`✅ Extracted ${itemCount} cart items (${duplicatesRemoved} duplicates removed)`, "success");
+        displayResultsTable(cartItems);
+        displayRawJson(cartItems);
+      } else {
+        showStatus("⚠️ No cart_item objects found in this JSON", "info");
+      }
+    }
+
+    function displayResultsTable(cartItems) {
+      const tbody = document.getElementById("resultsBody");
+      tbody.innerHTML = "";
+      
+      cartItems.forEach((item, index) => {
+        const row = document.createElement("tr");
+        const productId = item.product_id ?? "(No ID)";
+        const name = item.product_name || item.display_name || item.name || "–";
+        const imageUrl = item.image_url || (Array.isArray(item.images) ? item.images[0] : "–") || "–";
+        const preview = JSON.stringify(item).substring(0, 80);
+        
+        row.innerHTML = `
+          <td>${index + 1}</td>
+          <td><strong>${productId}</strong></td>
+          <td>${name}</td>
+          <td title="${imageUrl}">${imageUrl}</td>
+          <td>${preview}...</td>
+        `;
+        tbody.appendChild(row);
+      });
+      
+      document.getElementById("resultsPanel").style.display = "block";
+    }
+
+    function displayRawJson(cartItems) {
+      const output = JSON.stringify(cartItems, null, 2);
+      document.getElementById("jsonOutput").value = output;
+      document.getElementById("rawPanel").style.display = "block";
+    }
+
+    function showStatus(message, type) {
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = message;
+      statusEl.className = "status " + type;
+    }
+
+    function copyResultsJson() {
+      const output = document.getElementById("jsonOutput").value;
+      if (!output) {
+        showStatus("No results to copy", "error");
+        return;
+      }
+      navigator.clipboard.writeText(output).then(() => {
+        showStatus("✅ Copied to clipboard", "success");
+      });
+    }
+
+    function downloadResults() {
+      const output = document.getElementById("jsonOutput").value;
+      if (!output) {
+        showStatus("No results to download", "error");
+        return;
+      }
+      
+      const blob = new Blob([output], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `cart-items-${Date.now()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function downloadSkuImagesZip() {
+      if (currentExtractedItems.length === 0) {
+        const jsonInput = document.getElementById("jsonInput").value.trim();
+        if (jsonInput) {
+          runExtraction();
+        }
+      }
+
+      if (currentExtractedItems.length === 0) {
+        showStatus("Please paste JSON and extract cart items first", "error");
+        return;
+      }
+
+      const btn = document.getElementById("downloadZipBtn");
+      const originalText = btn.textContent;
+      btn.disabled = true;
+
+      try {
+        showStatus(`⏳ Downloading images for ${currentExtractedItems.length} products...`, "info");
+        const zipResult = await buildSkuImagesZip(currentExtractedItems, {
+          concurrency: 5,
+          onProgress: ({ completed, total }) => {
+            btn.textContent = `⏳ Downloading (${completed}/${total})...`;
+            showStatus(`⏳ Downloading SKU images (${completed}/${total})...`, "info");
+          },
+        });
+
+        if (zipResult.downloadedImages === 0) {
+          const reason = zipResult.failed[0] ? ` (${zipResult.failed[0].reason})` : "";
+          showStatus(`❌ Failed to download images${reason}`, "error");
+          return;
+        }
+
+        triggerZipDownload(zipResult.zipBytes);
+        const failInfo = zipResult.failed.length > 0 ? ` (${zipResult.failed.length} failed)` : "";
+        showStatus(
+          `✅ Downloaded ZIP with ${zipResult.downloadedProducts}/${zipResult.totalProducts} SKU folders${failInfo}`,
+          "success"
+        );
+      } catch (err) {
+        showStatus("❌ Error building ZIP: " + err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function resetOutputOnly() {
+      currentExtractedItems = [];
+      document.getElementById("status").textContent = "";
+      document.getElementById("status").className = "";
+      document.getElementById("stats").style.display = "none";
+      document.getElementById("resultsPanel").style.display = "none";
+      document.getElementById("rawPanel").style.display = "none";
+    }
+
+    function clearInput() {
+      document.getElementById("jsonInput").value = "";
+      resetOutputOnly();
+    }
+
+    function loadExample1() {
+      const example = {
+        "user": { "name": "John Doe" },
+        "timestamp": "2024-04-24T10:30:00Z",
+        "cart": {
+          "total": 99.99,
+          "items_count": 1,
+          "cart_item": {
+            "product_id": "396515",
+            "product_name": "Thums Up Cola Soft Drink",
+            "price": 75,
+            "quantity": 1,
+            "unit": "2 x 750 ml",
+            "image_url": "https://cdn.grofers.com/da/cms-assets/cms/product/rc-upload-1778220054761-1375.png"
+          }
+        }
+      };
+      resetOutputOnly();
+      document.getElementById("jsonInput").value = JSON.stringify(example, null, 2);
+      showStatus("Example loaded. Click 'Extract Cart Items' to test.", "info");
+    }
+
+    function loadExample2() {
+      const example = {
+        "success": true,
+        "data": {
+          "results": [
+            {
+              "id": 1,
+              "cart_item": {
+                "product_id": 396515,
+                "product_name": "Thums Up Cola Soft Drink",
+                "price": 75,
+                "image_url": "https://cdn.grofers.com/da/cms-assets/cms/product/rc-upload-1778220054761-1375.png"
+              }
+            },
+            {
+              "id": 2,
+              "cart_item": {
+                "product_id": 396515,
+                "product_name": "Thums Up Cola Soft Drink",
+                "price": 75,
+                "image_url": "https://cdn.grofers.com/da/cms-assets/cms/product/rc-upload-1778220054761-1375.png"
+              }
+            },
+            {
+              "id": 3,
+              "metadata": {
+                "suggested": {
+                  "cart_item": {
+                    "product_id": 314,
+                    "product_name": "Thums Up Soft Drink",
+                    "price": 38,
+                    "image_url": "https://cdn.grofers.com/da/cms-assets/cms/product/rc-upload-1770356946958-58.png"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      };
+      resetOutputOnly();
+      document.getElementById("jsonInput").value = JSON.stringify(example, null, 2);
+      showStatus("Example loaded (contains duplicates). Click 'Extract Cart Items' to test deduplication.", "info");
+    }
+
+    function loadExample3() {
+      const example = {
+        "level_1": {
+          "level_2": {
+            "level_3": {
+              "level_4": {
+                "level_5": {
+                  "cart_item": {
+                    "product_id": 283,
+                    "product_name": "Coca-Cola Soft Drink",
+                    "image_url": "https://cdn.grofers.com/da/cms-assets/cms/product/0cd486df-ef71-4374-a3e1-159759a72787.png"
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      resetOutputOnly();
+      document.getElementById("jsonInput").value = JSON.stringify(example, null, 2);
+      showStatus("Example loaded (deeply nested). Click 'Extract Cart Items' to test recursive traversal.", "info");
+    }
+
+    function switchTab(tabName, evt) {
+      document.querySelectorAll(".tab-content").forEach(el => {
+        el.classList.remove("active");
+      });
+      document.querySelectorAll(".tab").forEach(el => {
+        el.classList.remove("active");
+      });
+      
+      document.getElementById(tabName).classList.add("active");
+      if (evt && evt.target) {
+        evt.target.classList.add("active");
+      } else {
+        document.querySelector(".tab")?.classList.add("active");
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      clearInput();
+    });
+  </script>
+</body>
+</html>
