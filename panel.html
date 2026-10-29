@@ -3,11 +3,13 @@
   panel.html – UI rendered inside the NetContext DevTools panel.
 
   Elements:
-    #request-count  – live counter showing number of captured requests.
-    #copy-btn       – triggers clipboard copy of the JSON log.
-    #clear-btn      – clears the current log.
-    #status-msg     – confirmation / error feedback message.
-    #log-table      – table that lists captured requests.
+    #request-count        – live counter showing number of captured requests.
+    #copy-btn             – triggers clipboard copy of the JSON log.
+    #copy-cart-btn        – extracts cart_items from responses and copies as JSON.
+    #download-images-btn  – downloads product images in Snap-Door {SKU}/main.<ext> ZIP format.
+    #clear-btn            – clears the current log.
+    #status-msg           – confirmation / error feedback message.
+    #log-table            – table that lists captured requests.
 -->
 <html lang="en">
 
@@ -40,6 +42,7 @@
     #toolbar {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 10px;
       padding: 8px 12px;
       border-bottom: 1px solid #dadce0;
@@ -63,6 +66,7 @@
       font-size: 12px;
       cursor: pointer;
       transition: background 0.15s;
+      white-space: nowrap;
     }
 
     button:hover {
@@ -115,6 +119,53 @@
 
     #copy-btn:active {
       background: #0d47a1;
+    }
+
+    #copy-cart-btn {
+      background: #188038;
+      color: #fff;
+      border-color: #188038;
+    }
+
+    #copy-cart-btn:hover {
+      background: #0d652d;
+      border-color: #0d652d;
+      color: #fff;
+    }
+
+    #copy-cart-btn:active {
+      background: #0a4f23;
+    }
+
+    #copy-cart-btn:disabled {
+      background: #5f6368;
+      border-color: #5f6368;
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+
+    #download-images-btn {
+      background: #673ab7;
+      color: #fff;
+      border-color: #673ab7;
+    }
+
+    #download-images-btn:hover {
+      background: #512da8;
+      border-color: #512da8;
+      color: #fff;
+    }
+
+    #download-images-btn:active {
+      background: #311b92;
+    }
+
+    #download-images-btn:disabled {
+      background: #5f6368;
+      border-color: #5f6368;
+      color: #fff;
+      cursor: not-allowed;
+      opacity: 0.75;
     }
 
     /* ── Request counter ───────────────────────────────────────────── */
@@ -257,6 +308,14 @@
       Copy JSON Logs
     </button>
 
+    <button id="copy-cart-btn" title="Extract all unique cart_items from captured responses and copy as JSON">
+      🛒 Copy Cart Items
+    </button>
+
+    <button id="download-images-btn" title="Download product images as a ZIP ({product_id}/main.png) ready for Snap-Door bulk image upload">
+      🖼️ Download SKU Images
+    </button>
+
     <button id="clear-btn" title="Clear the current log">
       Clear
     </button>
@@ -298,6 +357,9 @@
 
   </div>
 
+  <script src="cart-item-extractor.js"></script>
+  <script src="cart-items-manager.js"></script>
+  <script src="zip-builder.js"></script>
   <script src="panel.js"></script>
 </body>
 
