@@ -25,11 +25,6 @@ const CRC32_TABLE = (() => {
   return table;
 })();
 
-/**
- * Compute CRC-32 checksum for a Uint8Array.
- * @param {Uint8Array} bytes
- * @returns {number} Unsigned 32-bit CRC
- */
 function crc32(bytes) {
   let crc = 0xffffffff;
   for (let i = 0; i < bytes.length; i++) {
@@ -38,11 +33,6 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/**
- * Convert a JS Date into DOS date & time 16-bit integers.
- * @param {Date} date
- * @returns {{ dosTime: number, dosDate: number }}
- */
 function toDosDateTime(date = new Date()) {
   const year = Math.max(1980, date.getFullYear());
   const month = date.getMonth() + 1;
@@ -56,11 +46,6 @@ function toDosDateTime(date = new Date()) {
   return { dosTime, dosDate };
 }
 
-/**
- * Decode a base64 string into a Uint8Array.
- * @param {string} base64
- * @returns {Uint8Array}
- */
 function base64ToUint8Array(base64) {
   const clean = base64.replace(/^data:[^;]+;base64,/, "").trim();
   const binary = atob(clean);
@@ -70,20 +55,6 @@ function base64ToUint8Array(base64) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
-}
-
-/**
- * Encode a Uint8Array into a base64 string.
- * @param {Uint8Array} bytes
- * @returns {string}
- */
-function uint8ArrayToBase64(bytes) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
 }
 
 /**
@@ -126,7 +97,6 @@ function createZipArchive(files) {
   let offset = 0;
   const localHeaderOffsets = [];
 
-  // 1. Write Local File Headers + File Data
   for (const entry of prepared) {
     localHeaderOffsets.push(offset);
 
@@ -152,7 +122,6 @@ function createZipArchive(files) {
 
   const centralDirOffset = offset;
 
-  // 2. Write Central Directory Headers
   for (let i = 0; i < prepared.length; i++) {
     const entry = prepared[i];
     const localOffset = localHeaderOffsets[i];
@@ -180,7 +149,6 @@ function createZipArchive(files) {
     offset += entry.nameBytes.byteLength;
   }
 
-  // 3. Write End of Central Directory Record (EOCD)
   view.setUint32(offset, 0x06054b50, true);
   view.setUint16(offset + 4, 0, true);
   view.setUint16(offset + 6, 0, true);
@@ -197,9 +165,6 @@ function createZipArchive(files) {
 
 const SNAP_DOOR_ALLOWED_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
-/**
- * Resolve the normalized SKU for a cart_item object.
- */
 function resolveItemSku(item) {
   if (!item || typeof item !== "object") return null;
   const rawSku = item.sku !== undefined && item.sku !== null && String(item.sku).trim() !== ""
@@ -219,9 +184,6 @@ function resolveItemSku(item) {
   return sanitized || null;
 }
 
-/**
- * Determine a valid Snap-Door image extension (.jpg, .jpeg, .png, .webp).
- */
 function resolveImageExtension(imageUrl, contentType = "") {
   try {
     const pathname = new URL(imageUrl).pathname;
@@ -242,9 +204,6 @@ function resolveImageExtension(imageUrl, contentType = "") {
   return ".png";
 }
 
-/**
- * Collect all image URLs associated with a single cart_item.
- */
 function extractProductImageUrls(item) {
   if (!item || typeof item !== "object") return [];
   const urls = [];
@@ -270,57 +229,8 @@ function extractProductImageUrls(item) {
 }
 
 /**
- * Tier 1: Fetch image via extension background service worker.
- */
-function fetchImageViaBackground(url) {
-  return new Promise(resolve => {
-    if (
-      typeof chrome === "undefined" ||
-      !chrome.runtime ||
-      typeof chrome.runtime.sendMessage !== "function"
-    ) {
-      resolve({ ok: false, reason: "chrome.runtime.sendMessage unavailable" });
-      return;
-    }
-
-    try {
-      chrome.runtime.sendMessage({ type: "FETCH_IMAGE", url }, response => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, reason: `runtime.lastError: ${chrome.runtime.lastError.message}` });
-          return;
-        }
-        if (!response) {
-          resolve({ ok: false, reason: "Empty response from background.js" });
-          return;
-        }
-        if (!response.ok || !response.base64) {
-          resolve({ ok: false, reason: response.error || "background FETCH_IMAGE returned not ok" });
-          return;
-        }
-        try {
-          const bytes = base64ToUint8Array(response.base64);
-          if (bytes.byteLength > 0) {
-            resolve({
-              ok: true,
-              bytes,
-              contentType: response.contentType || "",
-              source: response.source || "background",
-            });
-          } else {
-            resolve({ ok: false, reason: "Decoded 0 bytes from background" });
-          }
-        } catch (err) {
-          resolve({ ok: false, reason: `Base64 decode error: ${err.message}` });
-        }
-      });
-    } catch (err) {
-      resolve({ ok: false, reason: `sendMessage exception: ${err.message}` });
-    }
-  });
-}
-
-/**
- * Tier 2: Check if the image is cached in DevTools inspectedWindow resources.
+ * Tier 1: Read directly from Chrome DevTools inspected page resource cache
+ * (zero network traffic, zero CORS checks).
  */
 function fetchImageViaDevToolsResource(url) {
   return new Promise(resolve => {
@@ -330,24 +240,24 @@ function fetchImageViaDevToolsResource(url) {
       !chrome.devtools.inspectedWindow ||
       typeof chrome.devtools.inspectedWindow.getResources !== "function"
     ) {
-      resolve({ ok: false, reason: "inspectedWindow.getResources unavailable" });
+      resolve({ ok: false, reason: "not-in-devtools" });
       return;
     }
 
     try {
       chrome.devtools.inspectedWindow.getResources(resources => {
         if (!Array.isArray(resources)) {
-          resolve({ ok: false, reason: "No resources array" });
+          resolve({ ok: false, reason: "no-resources" });
           return;
         }
         const match = resources.find(r => r && r.url === url);
         if (!match || typeof match.getContent !== "function") {
-          resolve({ ok: false, reason: "Not in DevTools page resource cache" });
+          resolve({ ok: false, reason: "not-cached" });
           return;
         }
         match.getContent((content, encoding) => {
           if (!content) {
-            resolve({ ok: false, reason: "Resource cache content empty" });
+            resolve({ ok: false, reason: "empty-cache" });
             return;
           }
           try {
@@ -359,7 +269,7 @@ function fetchImageViaDevToolsResource(url) {
               }
             }
           } catch (_) {}
-          resolve({ ok: false, reason: "Resource cache not base64" });
+          resolve({ ok: false, reason: "cache-not-base64" });
         });
       });
     } catch (err) {
@@ -369,33 +279,26 @@ function fetchImageViaDevToolsResource(url) {
 }
 
 /**
- * Multi-tier cross-origin image fetcher with detailed diagnostics.
+ * Tier 2: Fetch via CORS-enabled image proxy endpoints (wsrv.nl / corsproxy.io).
+ * Never calls direct `fetch(cdn.grofers.com)` from `chrome-extension://` so the browser
+ * never logs red `blocked by CORS policy` console errors!
  */
 async function fetchImageBytes(url, onDebug = null) {
   const diagnostics = [];
 
-  // 1. Try background service worker
-  const bgRes = await fetchImageViaBackground(url);
-  if (bgRes.ok) {
-    return { bytes: bgRes.bytes, contentType: bgRes.contentType, source: bgRes.source };
-  }
-  diagnostics.push(`T1(bg): ${bgRes.reason}`);
-
-  // 2. Try DevTools inspectedWindow cached resources
+  // 1. Check DevTools page resource cache first (instant 0ms if image was rendered on page)
   const dtRes = await fetchImageViaDevToolsResource(url);
   if (dtRes.ok) {
     return { bytes: dtRes.bytes, contentType: dtRes.contentType, source: dtRes.source };
   }
-  diagnostics.push(`T2(cache): ${dtRes.reason}`);
 
-  // 3. Try direct fetch + CORS proxies from current context
-  const fetchCandidates = [
-    { name: "T3(direct)", target: url },
-    { name: "T4(wsrv.nl)", target: `https://wsrv.nl/?url=${encodeURIComponent(url)}` },
-    { name: "T5(corsproxy.io)", target: `https://corsproxy.io/?${encodeURIComponent(url)}` },
+  // 2. Fetch via CORS-enabled endpoints (Access-Control-Allow-Origin: *)
+  const corsSafeCandidates = [
+    { name: "wsrv.nl", target: `https://wsrv.nl/?url=${encodeURIComponent(url)}` },
+    { name: "corsproxy.io", target: `https://corsproxy.io/?${encodeURIComponent(url)}` },
   ];
 
-  for (const candidate of fetchCandidates) {
+  for (const candidate of corsSafeCandidates) {
     try {
       const response = await fetch(candidate.target, { credentials: "omit" });
       if (!response.ok) {
@@ -415,7 +318,7 @@ async function fetchImageBytes(url, onDebug = null) {
 
   const fullReason = diagnostics.join(" | ");
   if (onDebug) {
-    onDebug(`❌ All fetch tiers failed for ${url} -> ${fullReason}`, "error");
+    onDebug(`❌ Failed to fetch ${url} -> ${fullReason}`, "error");
   }
   throw new Error(fullReason);
 }
@@ -425,7 +328,7 @@ async function fetchImageBytes(url, onDebug = null) {
  * ZIP archive (`{SKU}/main.png`, `{SKU}/image_2.png`, etc.).
  */
 async function buildSkuImagesZip(cartItems, options = {}) {
-  const concurrency = options.concurrency || 5;
+  const concurrency = options.concurrency || 6;
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const onDebug = typeof options.onDebug === "function" ? options.onDebug : null;
 
@@ -476,7 +379,7 @@ async function buildSkuImagesZip(cartItems, options = {}) {
 
           zipFiles.push({ path: entryPath, data: bytes });
           productHasImage = true;
-          log(`✓ [${task.sku}] ${entryPath} (${(bytes.byteLength / 1024).toFixed(1)} KB via ${source})`, "success");
+          log(`✓ [${completed + 1}/${skuTasks.length}] ${entryPath} (${(bytes.byteLength / 1024).toFixed(1)} KB via ${source})`, "success");
         } catch (err) {
           failed.push({
             sku: task.sku,
@@ -512,7 +415,7 @@ async function buildSkuImagesZip(cartItems, options = {}) {
 
   log(`Packaging ${zipFiles.length} image(s) into PKZIP archive...`);
   const zipBytes = zipFiles.length > 0 ? createZipArchive(zipFiles) : new Uint8Array(0);
-  log(`ZIP archive ready: ${(zipBytes.byteLength / 1024).toFixed(1)} KB (${zipBytes.byteLength} bytes).`);
+  log(`ZIP archive ready: ${(zipBytes.byteLength / 1024 / 1024).toFixed(2)} MB (${zipBytes.byteLength} bytes).`);
 
   return {
     zipBytes,
@@ -524,33 +427,39 @@ async function buildSkuImagesZip(cartItems, options = {}) {
   };
 }
 
+// Keep reference to previous blobUrl so we can revoke it cleanly on next run
+let activeZipBlobUrl = null;
+
 /**
- * Trigger a browser file download for a Uint8Array ZIP archive.
- * Uses a 4-tier download strategy because Chrome DevTools panel iframes often
- * ignore standard `<a download>` clicks:
- *  1. `chrome.downloads.download` directly (if available in panel)
- *  2. `chrome.devtools.inspectedWindow.eval` (triggers Blob download in top-level inspected tab!)
- *  3. `chrome.runtime.sendMessage({ type: "DOWNLOAD_FILE" })` via background.js
- *  4. Local `<a download>` click in current document (for standalone test-extractor.html)
+ * Trigger a browser file download for a Uint8Array ZIP archive and return a
+ * persistent Blob URL so the UI can also render a direct clickable download link.
  *
  * @param {Uint8Array} zipBytes
  * @param {string} [filename]
  * @param {function} [onDebug]
- * @returns {Promise<string>} Name of download method that succeeded
+ * @returns {Promise<{ method: string, blobUrl: string, filename: string }>}
  */
 async function triggerZipDownload(zipBytes, filename, onDebug = null) {
   const log = (msg, level = "info") => {
     if (onDebug) onDebug(msg, level);
   };
 
+  if (activeZipBlobUrl) {
+    try {
+      URL.revokeObjectURL(activeZipBlobUrl);
+    } catch (_) {}
+    activeZipBlobUrl = null;
+  }
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const finalName = filename || `sku-images-${timestamp}.zip`;
+  const blob = new Blob([zipBytes], { type: "application/zip" });
+  const blobUrl = URL.createObjectURL(blob);
+  activeZipBlobUrl = blobUrl;
 
-  // Method 1: Native chrome.downloads.download in current context
+  // Method 1: Native chrome.downloads.download if permission is active
   if (typeof chrome !== "undefined" && chrome.downloads && typeof chrome.downloads.download === "function") {
     try {
-      const blob = new Blob([zipBytes], { type: "application/zip" });
-      const blobUrl = URL.createObjectURL(blob);
       const downloadId = await new Promise((resolve, reject) => {
         chrome.downloads.download({ url: blobUrl, filename: finalName, saveAs: false }, id => {
           if (chrome.runtime.lastError) {
@@ -560,85 +469,27 @@ async function triggerZipDownload(zipBytes, filename, onDebug = null) {
           }
         });
       });
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
-      log(`✓ Triggered download via chrome.downloads.download (id=${downloadId})`, "success");
-      return "chrome.downloads";
+      log(`✓ Triggered download via chrome.downloads (id=${downloadId}, file=${finalName})`, "success");
+      return { method: "chrome.downloads", blobUrl, filename: finalName };
     } catch (err) {
-      log(`Download Tier 1 (chrome.downloads) failed: ${err.message}`, "warn");
+      log(`chrome.downloads fallback note: ${err.message}`, "warn");
     }
   }
 
-  // Method 2: Trigger download in the top-level inspected page via chrome.devtools.inspectedWindow.eval
-  // This bypasses the DevTools iframe sandbox completely without needing any extension reload!
-  if (
-    typeof chrome !== "undefined" &&
-    chrome.devtools &&
-    chrome.devtools.inspectedWindow &&
-    typeof chrome.devtools.inspectedWindow.eval === "function"
-  ) {
-    try {
-      log(`Sending ZIP (${(zipBytes.byteLength / 1024).toFixed(1)} KB) to inspected tab for download...`);
-      const base64Zip = uint8ArrayToBase64(zipBytes);
-      const evalScript = `
-        (function() {
-          try {
-            var b64 = ${JSON.stringify(base64Zip)};
-            var bin = atob(b64);
-            var len = bin.length;
-            var arr = new Uint8Array(len);
-            for (var i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
-            var blob = new Blob([arr], { type: "application/zip" });
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement("a");
-            a.style.display = "none";
-            a.href = url;
-            a.download = ${JSON.stringify(finalName)};
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(function() {
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            }, 15000);
-            return { ok: true };
-          } catch (e) {
-            return { ok: false, error: e.message };
-          }
-        })()
-      `;
-
-      const evalResult = await new Promise(resolve => {
-        chrome.devtools.inspectedWindow.eval(evalScript, (result, exceptionInfo) => {
-          if (exceptionInfo) {
-            resolve({ ok: false, error: exceptionInfo.value || exceptionInfo.description || "eval error" });
-          } else {
-            resolve(result || { ok: false, error: "no eval result" });
-          }
-        });
-      });
-
-      if (evalResult && evalResult.ok) {
-        log(`✓ Triggered download in top-level inspected tab (${finalName})`, "success");
-        return "inspectedWindow.eval";
-      } else {
-        log(`Download Tier 2 (inspectedWindow.eval) failed: ${evalResult?.error}`, "warn");
-      }
-    } catch (err) {
-      log(`Download Tier 2 exception: ${err.message}`, "warn");
-    }
+  // Method 2: Direct <a download> click on Blob URL
+  try {
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = finalName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    log(`✓ Triggered browser download for ${finalName} (also added 📥 Save ZIP link in toolbar).`, "success");
+  } catch (err) {
+    log(`Anchor click error: ${err.message}`, "warn");
   }
 
-  // Method 3: Fallback to local <a download> click (works in standalone test-extractor.html)
-  const blob = new Blob([zipBytes], { type: "application/zip" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = finalName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 15000);
-  log(`✓ Triggered download via local <a download> (${finalName})`, "success");
-  return "anchor-click";
+  return { method: "blob-link", blobUrl, filename: finalName };
 }
 
 if (typeof module !== "undefined" && module.exports) {
