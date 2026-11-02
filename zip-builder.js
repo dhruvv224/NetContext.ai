@@ -46,17 +46,6 @@ function toDosDateTime(date = new Date()) {
   return { dosTime, dosDate };
 }
 
-function base64ToUint8Array(base64) {
-  const clean = base64.replace(/^data:[^;]+;base64,/, "").trim();
-  const binary = atob(clean);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 /**
  * Build a standard PKZIP archive buffer (STORE method) from an array of files.
  * Compatible with AdmZip (used by Snap-door-api) and all standard unzip tools.
@@ -185,6 +174,12 @@ function resolveItemSku(item) {
 }
 
 function resolveImageExtension(imageUrl, contentType = "") {
+  // The response type wins: CDNs often serve WEBP from a URL ending in .png.
+  const mime = (contentType || "").toLowerCase().split(";")[0].trim();
+  if (mime === "image/png") return ".png";
+  if (mime === "image/webp") return ".webp";
+  if (mime === "image/jpeg" || mime === "image/jpg") return ".jpg";
+
   try {
     const pathname = new URL(imageUrl).pathname;
     const lastDot = pathname.lastIndexOf(".");
@@ -196,12 +191,19 @@ function resolveImageExtension(imageUrl, contentType = "") {
     }
   } catch (_) {}
 
-  const mime = (contentType || "").toLowerCase().split(";")[0].trim();
-  if (mime === "image/png") return ".png";
-  if (mime === "image/webp") return ".webp";
-  if (mime === "image/jpeg" || mime === "image/jpg") return ".jpg";
-
   return ".png";
+}
+
+/**
+ * Turn a Cloudflare resize URL (https://cdn.grofers.com/cdn-cgi/image/f=auto,w=270/<path>)
+ * into the original asset URL. The resize endpoint sends no CORS headers, so fetching it
+ * always fails; the original is CORS-enabled for blinkit.com and full resolution.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+function originalImageUrl(url) {
+  return url.replace(/\/cdn-cgi\/image\/[^/]+\//, "/");
 }
 
 function extractProductImageUrls(item) {
@@ -225,102 +227,49 @@ function extractProductImageUrls(item) {
     }
   }
 
-  return [...new Set(urls)];
+  return [...new Set(urls.map(originalImageUrl))];
 }
 
-/**
- * Tier 1: Read directly from Chrome DevTools inspected page resource cache
- * (zero network traffic, zero CORS checks).
- */
-function fetchImageViaDevToolsResource(url) {
-  return new Promise(resolve => {
-    if (
-      typeof chrome === "undefined" ||
-      !chrome.devtools ||
-      !chrome.devtools.inspectedWindow ||
-      typeof chrome.devtools.inspectedWindow.getResources !== "function"
-    ) {
-      resolve({ ok: false, reason: "not-in-devtools" });
-      return;
-    }
-
-    try {
-      chrome.devtools.inspectedWindow.getResources(resources => {
-        if (!Array.isArray(resources)) {
-          resolve({ ok: false, reason: "no-resources" });
-          return;
-        }
-        const match = resources.find(r => r && r.url === url);
-        if (!match || typeof match.getContent !== "function") {
-          resolve({ ok: false, reason: "not-cached" });
-          return;
-        }
-        match.getContent((content, encoding) => {
-          if (!content) {
-            resolve({ ok: false, reason: "empty-cache" });
-            return;
-          }
-          try {
-            if (encoding === "base64") {
-              const bytes = base64ToUint8Array(content);
-              if (bytes.byteLength > 0) {
-                resolve({ ok: true, bytes, contentType: "", source: "devtools-cache" });
-                return;
-              }
-            }
-          } catch (_) {}
-          resolve({ ok: false, reason: "cache-not-base64" });
-        });
-      });
-    } catch (err) {
-      resolve({ ok: false, reason: err.message });
-    }
-  });
-}
+const IMAGE_FETCH_TIMEOUT_MS = 20000;
 
 /**
- * Tier 2: Fetch via CORS-enabled image proxy endpoints (wsrv.nl / corsproxy.io).
- * Never calls direct `fetch(cdn.grofers.com)` from `chrome-extension://` so the browser
- * never logs red `blocked by CORS policy` console errors!
+ * Fetch one product image directly from its CDN.
+ * The DevTools panel runs this inside the inspected Blinkit tab, because
+ * cdn.grofers.com only sends CORS headers for https://blinkit.com.
+ *
+ * @param {string} url
+ * @returns {Promise<{ bytes: Uint8Array, contentType: string }>}
  */
-async function fetchImageBytes(url, onDebug = null) {
-  const diagnostics = [];
-
-  // 1. Check DevTools page resource cache first (instant 0ms if image was rendered on page)
-  const dtRes = await fetchImageViaDevToolsResource(url);
-  if (dtRes.ok) {
-    return { bytes: dtRes.bytes, contentType: dtRes.contentType, source: dtRes.source };
-  }
-
-  // 2. Fetch via CORS-enabled endpoints (Access-Control-Allow-Origin: *)
-  const corsSafeCandidates = [
-    { name: "wsrv.nl", target: `https://wsrv.nl/?url=${encodeURIComponent(url)}` },
-    { name: "corsproxy.io", target: `https://corsproxy.io/?${encodeURIComponent(url)}` },
-  ];
-
-  for (const candidate of corsSafeCandidates) {
-    try {
-      const response = await fetch(candidate.target, { credentials: "omit" });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const contentType = response.headers.get("content-type") || "";
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      if (bytes.byteLength === 0) {
-        throw new Error("0 bytes");
-      }
-      return { bytes, contentType, source: candidate.name };
-    } catch (err) {
-      diagnostics.push(`${candidate.name}: ${err.message || String(err)}`);
+async function fetchImageBytes(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      credentials: "omit",
+      signal: controller.signal,
+      // Prefer formats Snap-door-api accepts over AVIF when the CDN negotiates.
+      headers: { Accept: "image/webp,image/png,image/jpeg,image/*;q=0.8" },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType && !/^image\//i.test(contentType)) {
+      throw new Error(`Not an image (${contentType.split(";")[0]})`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0) {
+      throw new Error("Empty image response");
+    }
+    return { bytes, contentType };
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      throw new Error(`Timed out after ${IMAGE_FETCH_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-
-  const fullReason = diagnostics.join(" | ");
-  if (onDebug) {
-    onDebug(`❌ Failed to fetch ${url} -> ${fullReason}`, "error");
-  }
-  throw new Error(fullReason);
 }
 
 /**
@@ -372,20 +321,18 @@ async function buildSkuImagesZip(cartItems, options = {}) {
       for (let imgIdx = 0; imgIdx < task.urls.length; imgIdx++) {
         const url = task.urls[imgIdx];
         try {
-          const { bytes, contentType, source } = await fetchImageBytes(url, onDebug);
+          const { bytes, contentType } = await fetchImageBytes(url);
           const ext = resolveImageExtension(url, contentType);
           const baseName = imgIdx === 0 ? "main" : `image_${imgIdx + 1}`;
           const entryPath = `${task.sku}/${baseName}${ext}`;
 
           zipFiles.push({ path: entryPath, data: bytes });
           productHasImage = true;
-          log(`✓ [${completed + 1}/${skuTasks.length}] ${entryPath} (${(bytes.byteLength / 1024).toFixed(1)} KB via ${source})`, "success");
+          log(`✓ [${completed + 1}/${skuTasks.length}] ${entryPath} (${(bytes.byteLength / 1024).toFixed(1)} KB)`, "success");
         } catch (err) {
-          failed.push({
-            sku: task.sku,
-            url,
-            reason: err && err.message ? err.message : String(err),
-          });
+          const reason = err && err.message ? err.message : String(err);
+          failed.push({ sku: task.sku, url, reason });
+          log(`❌ ${task.sku}: ${url} -> ${reason}`, "error");
         }
       }
 
@@ -427,69 +374,28 @@ async function buildSkuImagesZip(cartItems, options = {}) {
   };
 }
 
-// Keep reference to previous blobUrl so we can revoke it cleanly on next run
-let activeZipBlobUrl = null;
+/** Default archive name, e.g. sku-images-2026-10-30T10-15-00.zip */
+function defaultZipFileName() {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return `sku-images-${timestamp}.zip`;
+}
 
 /**
- * Trigger a browser file download for a Uint8Array ZIP archive and return a
- * persistent Blob URL so the UI can also render a direct clickable download link.
+ * Save a ZIP from a normal web page: the inspected tab (via panel.js) or test-extractor.html.
  *
  * @param {Uint8Array} zipBytes
  * @param {string} [filename]
- * @param {function} [onDebug]
- * @returns {Promise<{ method: string, blobUrl: string, filename: string }>}
  */
-async function triggerZipDownload(zipBytes, filename, onDebug = null) {
-  const log = (msg, level = "info") => {
-    if (onDebug) onDebug(msg, level);
-  };
-
-  if (activeZipBlobUrl) {
-    try {
-      URL.revokeObjectURL(activeZipBlobUrl);
-    } catch (_) {}
-    activeZipBlobUrl = null;
-  }
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const finalName = filename || `sku-images-${timestamp}.zip`;
+function triggerZipDownload(zipBytes, filename) {
   const blob = new Blob([zipBytes], { type: "application/zip" });
-  const blobUrl = URL.createObjectURL(blob);
-  activeZipBlobUrl = blobUrl;
-
-  // Method 1: Native chrome.downloads.download if permission is active
-  if (typeof chrome !== "undefined" && chrome.downloads && typeof chrome.downloads.download === "function") {
-    try {
-      const downloadId = await new Promise((resolve, reject) => {
-        chrome.downloads.download({ url: blobUrl, filename: finalName, saveAs: false }, id => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve(id);
-          }
-        });
-      });
-      log(`✓ Triggered download via chrome.downloads (id=${downloadId}, file=${finalName})`, "success");
-      return { method: "chrome.downloads", blobUrl, filename: finalName };
-    } catch (err) {
-      log(`chrome.downloads fallback note: ${err.message}`, "warn");
-    }
-  }
-
-  // Method 2: Direct <a download> click on Blob URL
-  try {
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = finalName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    log(`✓ Triggered browser download for ${finalName} (also added 📥 Save ZIP link in toolbar).`, "success");
-  } catch (err) {
-    log(`Anchor click error: ${err.message}`, "warn");
-  }
-
-  return { method: "blob-link", blobUrl, filename: finalName };
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || defaultZipFileName();
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -497,9 +403,11 @@ if (typeof module !== "undefined" && module.exports) {
     createZipArchive,
     resolveItemSku,
     resolveImageExtension,
+    originalImageUrl,
     extractProductImageUrls,
     fetchImageBytes,
     buildSkuImagesZip,
+    defaultZipFileName,
     triggerZipDownload,
   };
 }
