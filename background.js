@@ -5,7 +5,6 @@
  *  - Act as a message relay between the DevTools panel and the inspected page.
  *  - Maintain an in-memory log of captured fetch / XHR requests per tab.
  *  - Extract cart_item objects from API responses in background.
- *  - Fetch product images via CORS-safe endpoints on behalf of the DevTools panel.
  */
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -235,53 +234,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         timestamp: new Date().toISOString(),
       });
       break;
-    }
-
-    // Fetch image using CORS-enabled proxies first so Chrome never logs red CORS errors
-    case "FETCH_IMAGE": {
-      const targetUrl = message.url;
-      if (!targetUrl || typeof targetUrl !== "string") {
-        sendResponse({ ok: false, error: "Missing image URL" });
-        break;
-      }
-
-      const candidates = [
-        { name: "bg-wsrv", url: `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}` },
-        { name: "bg-corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` },
-      ];
-
-      (async () => {
-        const errors = [];
-        for (const candidate of candidates) {
-          try {
-            const res = await fetch(candidate.url, { credentials: "omit" });
-            if (!res.ok) {
-              throw new Error(`HTTP ${res.status}`);
-            }
-            const contentType = res.headers.get("content-type") || "";
-            const buffer = await res.arrayBuffer();
-            if (buffer.byteLength === 0) {
-              throw new Error("Empty response");
-            }
-            sendResponse({
-              ok: true,
-              source: candidate.name,
-              base64: arrayBufferToBase64(buffer),
-              contentType,
-              byteLength: buffer.byteLength,
-            });
-            return;
-          } catch (err) {
-            errors.push(`${candidate.name}: ${err.message || String(err)}`);
-          }
-        }
-        sendResponse({
-          ok: false,
-          error: errors.join(" | "),
-        });
-      })();
-
-      return true;
     }
 
     default:
