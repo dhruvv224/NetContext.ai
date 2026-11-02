@@ -171,6 +171,47 @@
       opacity: 0.75;
     }
 
+    #add-to-sheet-btn {
+      background: #e8710a;
+      color: #fff;
+      border-color: #e8710a;
+    }
+
+    #add-to-sheet-btn:hover {
+      background: #c35a00;
+      border-color: #c35a00;
+      color: #fff;
+    }
+
+    #add-to-sheet-btn:active {
+      background: #9c4800;
+    }
+
+    #add-to-sheet-btn:disabled {
+      background: #5f6368;
+      border-color: #5f6368;
+      color: #fff;
+      cursor: not-allowed;
+      opacity: 0.75;
+    }
+
+    #sheet-count {
+      font-size: 12px;
+      color: #5f6368;
+      white-space: nowrap;
+    }
+
+    #clear-sheet-btn {
+      background: #fff;
+      color: #b31412;
+      border-color: #dadce0;
+    }
+
+    #clear-sheet-btn:hover {
+      background: #fce8e6;
+      border-color: #b31412;
+    }
+
     #manual-zip-link {
       display: none;
       padding: 5px 10px;
@@ -416,9 +457,15 @@
       🖼️ Download SKU Images
     </button>
 
-    <a id="manual-zip-link" href="#" download="sku-images.zip" title="Click to save the generated SKU Images ZIP file">
-      📥 Save ZIP
-    </a>
+    <button id="add-to-sheet-btn" title="Append newly captured products to a growing Snap-Door inventory CSV (click again after scrolling for more)">
+      📄 Add to Sheet
+    </button>
+
+    <span id="sheet-count" title="Products currently accumulated in the sheet">0 in sheet</span>
+
+    <button id="clear-sheet-btn" title="Clear the accumulated sheet and start a new CSV file">
+      Clear Sheet
+    </button>
 
     <button id="toggle-debug-btn" title="Open/close the live diagnostic log drawer">
       🐞 Debug
